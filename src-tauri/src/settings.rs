@@ -11,7 +11,14 @@ pub struct Settings {
     pub notifications: bool,
     pub gmail: Gmail,
     pub outlook: Outlook,
+    pub hoyolab: Hoyolab,
     pub ai: Ai,
+}
+
+#[derive(Serialize, Deserialize, Clone, Default)]
+#[serde(default)]
+pub struct Hoyolab {
+    pub enabled: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, Default)]

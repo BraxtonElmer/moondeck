@@ -113,7 +113,7 @@ const S = {
 };
 
 // ---------- derived ----------
-const GOAL_COLORS = { git: "#7048e8", "Window time": "#4263eb", Manual: "#2f9e44" };
+const GOAL_COLORS = { git: "#7048e8", "Window time": "#4263eb", Manual: "#2f9e44", HoYoLAB: "#f08c00" };
 function left(secs) {
   if (secs == null) return "today";
   if (secs < 0) return "overdue";
@@ -570,6 +570,15 @@ function renderSheet() {
         : S.sheet.signin
           ? `<div class="set-row"><span class="status">Enter <b class="code">${esc(S.sheet.signin.user_code)}</b> at ${esc(S.sheet.signin.verification_uri)} (opened in your browser)</span></div>`
           : `<div class="set-row"><span class="status">Not signed in</span><button class="btn primary" data-act="outlookin">Sign in</button></div>`}` : ""}
+      <div class="set-row"><div>Genshin Impact (HoYoLAB)<small>Real-Time Notes: commissions, resin, expeditions. Read-only.</small></div>${sw("hoyolab.enabled", st.hoyolab?.enabled)}</div>
+      ${st.hoyolab?.enabled ? `
+      <span class="status">On hoyolab.com, press F12 › Application › Cookies › https://www.hoyolab.com, then copy <b>ltoken_v2</b> and <b>ltuid_v2</b> as <code>ltoken_v2=…; ltuid_v2=…</code>. Turn on Real-Time Notes in your Battle Chronicle.</span>
+      <div class="keyrow">
+        <label class="field">HoYoLAB cookie<input id="key-hoyolab" type="password" autocomplete="off" placeholder="${S.sheet.secrets.hoyolab ? "•••••••• (saved)" : "ltoken_v2=…; ltuid_v2=…"}"></label>
+        <button class="btn" data-act="savekey" data-arg="hoyolab">Save</button>
+        <button class="btn" data-act="clearkey" data-arg="hoyolab">Clear</button>
+      </div>
+      <div class="set-row"><span class="status${S.sheet.hoyo ? (S.sheet.hoyo.ok ? " ok" : " bad") : ""}">${esc(S.sheet.hoyo?.text ?? (S.sheet.secrets.hoyolab ? "Cookie saved · checks every 20 minutes" : "Not set"))}</span><button class="btn primary" data-act="hoyocheck">Check now</button></div>` : ""}
       ${st.gmail.enabled || st.outlook.enabled ? `<div class="set-row"><span class="status${S.sheet.mail ? (S.sheet.mail.ok ? " ok" : " bad") : ""}">${esc(S.sheet.mail?.text ?? "Checks every 5 minutes")}</span><button class="btn" data-act="mailcheck">Check now</button></div>` : ""}
     </section>
 
@@ -595,7 +604,7 @@ function saveSettings() {
 }
 async function openSettings() {
   const view = tauri ? await invoke("get_settings").catch((e) => { toast(String(e)); return null; })
-    : { settings: { autostart: false, notifications: false, gmail: { enabled: false, address: "" }, outlook: { enabled: false, client_id: "", account: "" }, ai: { provider: "off", base_url: "", model: "" } }, secrets: {}, data_dir: "%APPDATA%\\dev.braxtonelmer.moondeck" };
+    : { settings: { autostart: false, notifications: false, gmail: { enabled: false, address: "" }, outlook: { enabled: false, client_id: "", account: "" }, hoyolab: { enabled: false }, ai: { provider: "off", base_url: "", model: "" } }, secrets: {}, data_dir: "%APPDATA%\\dev.braxtonelmer.moondeck" };
   if (!view) return;
   S.sheet = view;
   S.pop = null; S.cmdOpen = false;
@@ -713,6 +722,13 @@ const ACTIONS = {
     invoke("outlook_sign_in").then(
       (code) => { S.sheet.signin = code; render(); },
       (e) => { S.sheet.mail = { ok: false, text: String(e) }; render(); },
+    );
+  },
+  hoyocheck: () => {
+    S.sheet.hoyo = { ok: true, text: "Checking…" };
+    invoke("hoyolab_check").then(
+      (text) => { S.sheet.hoyo = { ok: true, text }; render(); loadGoals(); loadTasks(); },
+      (e) => { S.sheet.hoyo = { ok: false, text: String(e) }; render(); },
     );
   },
   outlookout: () => invoke("outlook_sign_out").then(openSettings),

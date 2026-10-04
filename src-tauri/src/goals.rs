@@ -77,6 +77,8 @@ pub enum Days {
 pub enum Evidence {
     AppTime { apps: Vec<String>, minutes: u32 },
     Git { repo: String },
+    /// Genshin daily commissions from HoYoLAB Real-Time Notes.
+    Hoyolab,
     Manual,
 }
 
@@ -232,6 +234,17 @@ fn evaluate_day(store: &Store, goal: &Goal, date: NaiveDate, git: &HashMap<Naive
             };
             (if n > 0 { 100 } else { 0 }, detail)
         }
+        Evidence::Hoyolab => match crate::hoyolab::latest(store, from, to) {
+            None => (0, "No HoYoLAB data yet".to_string()),
+            Some(n) if n.commissions_total == 0 => (0, "No commissions today".to_string()),
+            // Only complete once the bonus is claimed from Katheryne.
+            Some(n) if n.commissions_done >= n.commissions_total && n.bonus_claimed => (100, "All commissions + bonus".to_string()),
+            Some(n) if n.commissions_done >= n.commissions_total => (95, "4/4 done · claim the bonus from Katheryne".to_string()),
+            Some(n) => (
+                n.commissions_done * 100 / n.commissions_total,
+                format!("{} of {} commissions · resin {}/{}", n.commissions_done, n.commissions_total, n.resin, n.resin_max),
+            ),
+        },
         Evidence::Manual => (0, "Not checked yet".to_string()),
     };
 
@@ -298,6 +311,7 @@ pub fn today(store: &Store, cfg: &Config) -> Vec<Status> {
                 source: match g.evidence {
                     Evidence::AppTime { .. } => "Window time",
                     Evidence::Git { .. } => "git",
+                    Evidence::Hoyolab => "HoYoLAB",
                     Evidence::Manual => "Manual",
                 }
                 .into(),
@@ -332,6 +346,20 @@ pub fn mark(store: &Store, id: &str, kind: &str) -> rusqlite::Result<()> {
             detail: String::new(),
         })
         .map(|_| ())
+}
+
+/// Add a goal to `goals.json` unless one with the same evidence type already exists.
+pub fn ensure(dir: &Path, evidence_type: &str, goal: serde_json::Value) -> Result<bool, String> {
+    load(dir)?;
+    let text = std::fs::read_to_string(path(dir)).map_err(|e| e.to_string())?;
+    let mut v: serde_json::Value = serde_json::from_str(&text).map_err(|e| e.to_string())?;
+    let goals = v["goals"].as_array_mut().ok_or("goals.json has no goals list")?;
+    if goals.iter().any(|g| g["evidence"]["type"] == evidence_type) {
+        return Ok(false);
+    }
+    goals.push(goal);
+    std::fs::write(path(dir), serde_json::to_string_pretty(&v).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+    Ok(true)
 }
 
 /// Hide a goal from nudges until `until` (unix seconds).

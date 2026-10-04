@@ -9,7 +9,7 @@ use windows::{
 };
 
 /// Secrets the UI is allowed to manage.
-pub const NAMES: &[&str] = &["ai", "gmail", "outlook"];
+pub const NAMES: &[&str] = &["ai", "gmail", "outlook", "hoyolab"];
 
 fn target(name: &str) -> Vec<u16> {
     format!("moondeck:{name}").encode_utf16().chain(std::iter::once(0)).collect()

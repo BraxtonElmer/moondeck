@@ -6,6 +6,7 @@ mod apps;
 mod deck;
 mod detect;
 mod goals;
+mod hoyolab;
 mod imap;
 mod inbox;
 mod mail;
@@ -301,6 +302,25 @@ fn outlook_sign_out(app: AppHandle) -> Result<(), String> {
     settings::save(&dir, &s)
 }
 
+/// Fetch Genshin notes now; the first success also adds a "Genshin dailies" goal.
+#[tauri::command]
+fn hoyolab_check(app: AppHandle, store: tauri::State<Arc<Store>>) -> Result<String, String> {
+    let summary = hoyolab::check(&store)?;
+    let added = goals::ensure(
+        &data_dir(&app)?,
+        "hoyolab",
+        serde_json::json!({
+            "id": "genshin-dailies",
+            "name": "Genshin dailies",
+            "due": "22:00",
+            "days": "daily",
+            "evidence": { "type": "hoyolab" },
+            "action": { "label": "Launch game", "open": ["Genshin Impact"] }
+        }),
+    )?;
+    Ok(if added { format!("{summary} · added a Genshin dailies goal") } else { summary })
+}
+
 #[tauri::command]
 fn pin_widget(app: AppHandle, kind: String) -> Result<(), String> {
     widgets::open(&app, &kind)
@@ -386,6 +406,7 @@ fn main() {
             mail_check,
             outlook_sign_in,
             outlook_sign_out,
+            hoyolab_check,
             pin_widget,
             close_widget,
             get_settings,
@@ -409,6 +430,7 @@ fn main() {
             nudge::spawn(app.handle().clone(), store.clone(), dir.clone());
             notifications::spawn(store.clone(), dir.clone());
             mail::spawn(store.clone(), dir.clone());
+            hoyolab::spawn(store.clone(), dir.clone());
             app.manage(store);
 
             let open = MenuItem::with_id(app, "open", "Open  (Alt+Space)", true, None::<&str>)?;
