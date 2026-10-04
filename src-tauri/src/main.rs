@@ -47,6 +47,21 @@ fn hide_overlay(app: AppHandle) {
     hide(&app);
 }
 
+/// Windows accent color as `#rrggbb` (stored as 0xAABBGGRR in the registry).
+#[tauri::command]
+fn accent_color() -> Option<String> {
+    #[cfg(windows)]
+    {
+        let key = windows_registry::CURRENT_USER
+            .open(r"Software\Microsoft\Windows\DWM")
+            .ok()?;
+        let v = key.get_u32("AccentColor").ok()?;
+        Some(format!("#{:02x}{:02x}{:02x}", v & 0xff, (v >> 8) & 0xff, (v >> 16) & 0xff))
+    }
+    #[cfg(not(windows))]
+    None
+}
+
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _, _| show(app)))
@@ -61,7 +76,7 @@ fn main() {
                 })
                 .build(),
         )
-        .invoke_handler(tauri::generate_handler![hide_overlay])
+        .invoke_handler(tauri::generate_handler![hide_overlay, accent_color])
         .setup(|app| {
             let open = MenuItem::with_id(app, "open", "Open  (Alt+Space)", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "Quit Moondeck", true, None::<&str>)?;

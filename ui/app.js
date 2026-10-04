@@ -45,7 +45,7 @@ const GOALS = [
 const TIMELINE = [
   ["09:10", "VS Code", "side-project", "1h 42m", 100, "#4263eb"],
   ["11:05", "Firefox", "docs.rs", "38m", 37, "#4263eb"],
-  ["12:30", "Away", "idle", "55m", 54, "rgba(24,24,31,.18)"],
+  ["12:30", "Away", "idle", "55m", 54, "var(--track)"],
   ["13:40", "Blender", "donut", "20m", 20, "#7048e8"],
   ["15:02", "Genshin", "game", "31m", 30, "#f08c00"],
   ["16:10", "Discord", "chat", "12m", 12, "#e64980"],
@@ -104,7 +104,7 @@ function renderTop(gs, q) {
     <span class="count">${doneCount} of ${gs.length}</span>
     <span class="spacer"></span>
     <span class="due">${svg("clock", 14, 2.2)}${esc(q[0] ? q[0].short : "All clear")}</span>
-    <button class="search round dark" data-act="cmd" aria-label="Search and run commands">${svg("search", 18, 2.2)}</button>`;
+    <button class="search round primary" data-act="cmd" aria-label="Search and run commands">${svg("search", 18, 2.2)}</button>`;
 }
 
 const COMMANDS = [
@@ -133,8 +133,8 @@ function filterCmd(q) {
 
 function tickIcon(g) {
   if (g.done) return `<span class="check">${svg("check", 13, 3)}</span>`;
-  if (g.missing) return `<svg width="24" height="24" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" stroke="#e03131" stroke-width="2.4" stroke-dasharray="3 3.1"/></svg>`;
-  return `<svg width="24" height="24" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" stroke="rgba(24,24,31,.12)" stroke-width="3"/><circle cx="12" cy="12" r="9" fill="none" stroke="${g.color}" stroke-width="3" stroke-linecap="round" stroke-dasharray="${(g.pct * 0.5655).toFixed(1)} 57" transform="rotate(-90 12 12)"/></svg>`;
+  if (g.missing) return `<svg width="24" height="24" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" style="stroke:var(--red)" stroke-width="2.4" stroke-dasharray="3 3.1"/></svg>`;
+  return `<svg width="24" height="24" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" class="ring-track" stroke-width="3"/><circle cx="12" cy="12" r="9" fill="none" stroke="${g.color}" stroke-width="3" stroke-linecap="round" stroke-dasharray="${(g.pct * 0.5655).toFixed(1)} 57" transform="rotate(-90 12 12)"/></svg>`;
 }
 function renderLeft(gs) {
   const tabs = [["today", "Today"], ["timeline", "Timeline"], ["streaks", "Streaks"]]
@@ -172,7 +172,7 @@ function renderRight(q) {
     next = `<div class="next">
       <span class="tag ${kind}">${esc(S.snoozed[c.id] ? "Snoozed · " + S.snoozed[c.id] : c.tag)}</span>
       <div><h2>${esc(c.title)}</h2><p>${esc(c.src)} · due ${esc(c.due)} · <b>${esc(c.left)}</b></p></div>
-      <button class="pill dark" data-act="primary">${esc(c.action)}</button>
+      <button class="pill primary" data-act="primary">${esc(c.action)}</button>
       <div class="pair">
         <button class="pill" data-act="done">Done</button>
         <button class="pill${S.snoozeOpen ? " on" : ""}" data-act="snoozemenu">Later ▾</button>
@@ -186,11 +186,11 @@ function renderRight(q) {
   $("right").innerHTML = `
     <span class="label">Up next</span>
     ${next}
-    ${then.length ? `<div class="then"><small>Then</small>${then.map((g) => `<div><i style="background:${g.missing ? "#e03131" : g.color}"></i><b>${esc(g.name)}</b><small>${esc(S.snoozed[g.id] ? "Snoozed · " + S.snoozed[g.id] : "Due " + g.due)}</small></div>`).join("")}</div>` : ""}
+    ${then.length ? `<div class="then"><small>Then</small>${then.map((g) => `<div><i style="background:${g.missing ? "var(--red)" : g.color}"></i><b>${esc(g.name)}</b><small>${esc(S.snoozed[g.id] ? "Snoozed · " + S.snoozed[g.id] : "Due " + g.due)}</small></div>`).join("")}</div>` : ""}
     <div class="notes">
       <span class="label">Quick note</span>
       ${S.notes.map((n) => `<div class="note">${esc(n)}</div>`).join("")}
-      <div class="noteform"><input id="note" type="text" placeholder="Jot something…" aria-label="Quick note"><button class="dark" data-act="note" aria-label="Add note">${svg("plus", 16, 2.4)}</button></div>
+      <div class="noteform"><input id="note" type="text" placeholder="Jot something…" aria-label="Quick note"><button class="primary" data-act="note" aria-label="Add note">${svg("plus", 16, 2.4)}</button></div>
     </div>`;
 }
 
@@ -199,17 +199,17 @@ function tiles(t) {
   const add = { label: "Add tile", icon: "plus", cls: "add", act: "toast", arg: "Pick an app, folder, URL or script to pin" };
   const pages = {
     launch: [
-      { label: "Start my day", icon: "sun", style: "background:#ffe8cc;color:#d9480f", act: "startday" },
-      { label: "Side project", icon: "folder", style: "background:#18181f;color:#fff", dot: true, act: "open", arg: "Side project" },
+      { label: "Start my day", icon: "sun", cls: "soft", act: "startday" },
+      { label: "Side project", icon: "folder", cls: "accent", dot: true, act: "open", arg: "Side project" },
       { label: "Client X", icon: "brief", act: "open", arg: "Client X workspace" },
       { label: "Blender", icon: "cube", act: "open", arg: "Blender · donut.blend" },
       { label: "Genshin", icon: "pad", act: "open", arg: "Genshin Impact" },
       add,
     ],
     controls: [
-      { label: focusOn ? "Until " + fmt(new Date(S.focusUntil)) : "Focus 50m", icon: "target", style: focusOn ? "background:#2b8a3e;color:#fff" : "background:#d3f9d8;color:#2b8a3e", act: "focus" },
-      { label: t.running ? t.text : "Timer", icon: "timer", cls: S.pop === "timer" ? "active" : "", style: t.running && S.pop !== "timer" ? "background:#dbe4ff;color:#364fc7" : "", act: "pop", arg: "timer" },
-      { label: S.micMuted ? "Muted" : "Mic on", icon: S.micMuted ? "micoff" : "mic", style: S.micMuted ? "background:#ffe3e3;color:#c92a2a" : "", act: "mic" },
+      { label: focusOn ? "Until " + fmt(new Date(S.focusUntil)) : "Focus 50m", icon: "target", cls: focusOn ? "accent" : "soft", act: "focus" },
+      { label: t.running ? t.text : "Timer", icon: "timer", cls: S.pop === "timer" ? "active" : t.running ? "soft" : "", act: "pop", arg: "timer" },
+      { label: S.micMuted ? "Muted" : "Mic on", icon: S.micMuted ? "micoff" : "mic", cls: S.micMuted ? "warn" : "", act: "mic" },
       { label: S.playing ? "Pause" : "Play", icon: S.playing ? "pause" : "play", act: "play" },
       { label: `Vol ${S.volume}%`, icon: "vol", cls: S.pop === "volume" ? "active" : "", act: "pop", arg: "volume" },
     ],
@@ -232,7 +232,7 @@ function renderDeck(t) {
     <div class="pages">${pages}</div>
     <div class="tiles">${tiles(t).map((x) => `
       <button class="tile ${x.cls || ""}" data-act="${x.act}" data-arg="${esc(x.arg || "")}" aria-label="${esc(x.label)}">
-        <span class="ico" style="${x.style || ""}">${svg(x.icon)}</span>${x.dot ? '<span class="dot"></span>' : ""}${esc(x.label)}
+        <span class="ico">${svg(x.icon)}</span>${x.dot ? '<span class="dot"></span>' : ""}${esc(x.label)}
       </button>`).join("")}</div>
     <button class="editbtn round${S.editing ? " on" : ""}" data-act="edit" aria-label="Edit deck">${svg("pencil", 18, 2)}</button>`;
 }
@@ -247,7 +247,7 @@ function renderPop(t) {
   } else if (S.pop === "timer") {
     el.innerHTML = `<header>Timer <span id="timertext">${t.text}</span></header>
       <div class="grid4">${[5, 15, 25, 50].map((m) => `<button data-act="timer" data-arg="${m}">${m}m</button>`).join("")}</div>
-      ${t.running ? `<button class="pill dark" data-act="timerstop">Stop timer</button>` : ""}
+      ${t.running ? `<button class="pill primary" data-act="timerstop">Stop timer</button>` : ""}
       <p>Timers count as proof for manual goals like “Read 30 min”.</p>`;
   } else if (S.pop === "clip") {
     el.innerHTML = `<header>Clipboard</header>${CLIPS.map(([text, meta]) => `<button class="clip row" data-act="toast" data-arg="Copied again: ${esc(text.length > 28 ? text.slice(0, 28) + "…" : text)}"><b>${esc(text)}</b><small>${meta}</small></button>`).join("")}`;
@@ -257,7 +257,7 @@ function renderPop(t) {
 function renderToast() {
   const el = $("toast");
   el.hidden = !S.toast || !!S.pop;
-  el.innerHTML = `${svg("check", 14, 3).replace('stroke="currentColor"', 'stroke="#8ce99a"')}${esc(S.toast)}`;
+  el.innerHTML = `${svg("check", 14, 3)}${esc(S.toast)}`;
 }
 
 function render() {
@@ -364,10 +364,22 @@ setInterval(() => {
   }
 }, 1000);
 
+// Accent follows the Windows accent color.
+async function syncAccent() {
+  const hex = await invoke("accent_color").catch(() => null);
+  if (!hex) return;
+  const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
+  const light = (0.299 * r + 0.587 * g + 0.114 * b) / 255 > 0.5;
+  document.documentElement.style.setProperty("--accent", hex);
+  document.documentElement.style.setProperty("--accent-ink", light ? "#111" : "#fff");
+}
+
 // Fresh state every time the overlay is summoned.
 tauri?.event?.listen("overlay:shown", () => {
+  syncAccent();
   S.pop = null; S.cmdOpen = false; S.snoozeOpen = false;
   render();
 });
 
 render();
+syncAccent();
