@@ -85,6 +85,7 @@ const S = {
   deckCfg: tauri ? null : SAMPLE_DECK,
   timerEnd: null, toast: "",
   timeline: tauri ? null : SAMPLE_TIMELINE,
+  sheet: null,
 };
 
 // ---------- derived ----------
@@ -297,6 +298,96 @@ function renderPop(t) {
   }
 }
 
+// ---------- settings ----------
+const PROVIDERS = [
+  ["off", "Off"], ["groq", "Groq"], ["gemini", "Gemini"], ["custom", "Custom"],
+];
+const PRESET_HINT = {
+  groq: ["https://api.groq.com/openai/v1", "llama-3.3-70b-versatile"],
+  gemini: ["https://generativelanguage.googleapis.com/v1beta/openai", "gemini-2.5-flash"],
+  custom: ["http://localhost:11434/v1", "llama3.2"],
+};
+const sw = (key, on) => `<label class="switch"><input type="checkbox" data-set="${key}"${on ? " checked" : ""}><span></span></label>`;
+const keyStatus = (name) => S.sheet.secrets[name] ? `<span class="status ok">Saved in Windows Credential Manager</span>` : `<span class="status">Not set</span>`;
+
+function renderSheet() {
+  const el = $("sheet");
+  el.hidden = !S.sheet;
+  if (!S.sheet) return;
+  const { settings: st, data_dir } = S.sheet;
+  const ai = st.ai;
+  const [hintUrl, hintModel] = PRESET_HINT[ai.provider] ?? ["", ""];
+  el.innerHTML = `
+    <header><h2>Settings</h2><button class="close round" data-act="settings" aria-label="Close settings">${svg("plus", 16, 2.4).replace("<svg", '<svg style="transform:rotate(45deg)"')}</button></header>
+
+    <section>
+      <h3>General</h3>
+      <div class="set-row"><div>Start with Windows<small>Runs quietly in the tray, Alt + Space to open.</small></div>${sw("autostart", st.autostart)}</div>
+    </section>
+
+    <section>
+      <h3>AI (optional)</h3>
+      <p class="status">Used to pull tasks and deadlines out of messages. Local rules work without it.</p>
+      <div class="tabs">${PROVIDERS.map(([id, l]) => `<button class="${ai.provider === id ? "on" : ""}" data-act="provider" data-arg="${id}">${l}</button>`).join("")}</div>
+      ${ai.provider === "off" ? "" : `
+      <div class="fields2">
+        <label class="field">Base URL<input data-set="ai.base_url" value="${esc(ai.base_url)}" placeholder="${hintUrl}"></label>
+        <label class="field">Model<input data-set="ai.model" value="${esc(ai.model)}" placeholder="${hintModel}"></label>
+      </div>
+      <div class="keyrow">
+        <label class="field">API key${ai.provider === "custom" ? " (blank for local servers)" : ""}<input id="key-ai" type="password" autocomplete="off" placeholder="${S.sheet.secrets.ai ? "•••••••• (saved)" : "Paste key"}"></label>
+        <button class="btn" data-act="savekey" data-arg="ai">Save</button>
+        <button class="btn" data-act="clearkey" data-arg="ai">Clear</button>
+      </div>
+      <div class="set-row">${keyStatus("ai")}<button class="btn primary" data-act="aitest">Test</button></div>
+      ${S.sheet.test ? `<span class="status ${S.sheet.test.ok ? "ok" : "bad"}">${esc(S.sheet.test.text)}</span>` : ""}`}
+    </section>
+
+    <section>
+      <h3>Sources</h3>
+      <div class="set-row"><div>Windows notifications<small>Reads Windows' notification history on this PC to spot tasks and deadlines.</small></div>${sw("notifications", st.notifications)}</div>
+      <div class="set-row"><div>Gmail<small>IMAP with an app password (Google Account › Security › App passwords).</small></div>${sw("gmail.enabled", st.gmail.enabled)}</div>
+      ${st.gmail.enabled ? `
+      <label class="field">Gmail address<input data-set="gmail.address" value="${esc(st.gmail.address)}" placeholder="you@gmail.com"></label>
+      <div class="keyrow">
+        <label class="field">App password<input id="key-gmail" type="password" autocomplete="off" placeholder="${S.sheet.secrets.gmail ? "•••••••• (saved)" : "16-character app password"}"></label>
+        <button class="btn" data-act="savekey" data-arg="gmail">Save</button>
+        <button class="btn" data-act="clearkey" data-arg="gmail">Clear</button>
+      </div>${keyStatus("gmail")}` : ""}
+      <div class="set-row"><div>Outlook / Microsoft 365<small>Signs in with your Microsoft account using your own Azure app registration.</small></div>${sw("outlook.enabled", st.outlook.enabled)}</div>
+      ${st.outlook.enabled ? `
+      <label class="field">Application (client) ID<input data-set="outlook.client_id" value="${esc(st.outlook.client_id)}" placeholder="00000000-0000-0000-0000-000000000000"></label>` : ""}
+    </section>
+
+    <section>
+      <h3>Files</h3>
+      <div class="links">
+        <button class="btn" data-act="editgoals">Edit goals</button>
+        <button class="btn" data-act="edit">Edit deck</button>
+        <button class="btn" data-act="datadir">Open data folder</button>
+      </div>
+      <span class="status">${esc(data_dir)}</span>
+    </section>`;
+}
+
+function setPath(obj, path, value) {
+  const keys = path.split(".");
+  const last = keys.pop();
+  keys.reduce((o, k) => o[k], obj)[last] = value;
+}
+function saveSettings() {
+  if (!S.sheet) return;
+  invoke("save_settings", { settings: S.sheet.settings }).catch((e) => toast("Couldn't save: " + e));
+}
+async function openSettings() {
+  const view = tauri ? await invoke("get_settings").catch((e) => { toast(String(e)); return null; })
+    : { settings: { autostart: false, notifications: false, gmail: { enabled: false, address: "" }, outlook: { enabled: false, client_id: "", account: "" }, ai: { provider: "off", base_url: "", model: "" } }, secrets: {}, data_dir: "%APPDATA%\\dev.braxtonelmer.moondeck" };
+  if (!view) return;
+  S.sheet = view;
+  S.pop = null; S.cmdOpen = false;
+  render();
+}
+
 function renderToast() {
   const el = $("toast");
   el.hidden = !S.toast || !!S.pop;
@@ -314,6 +405,7 @@ function render() {
   renderDeck(t);
   renderPop(t);
   renderToast();
+  renderSheet();
   $("settings").innerHTML = svg("sliders", 18, 2);
   $("hint").innerHTML = "<kbd>Alt + Space</kbd> opens · <kbd>Esc</kbd> back to tray";
 }
@@ -366,6 +458,25 @@ const ACTIONS = {
     if (c.action?.open?.length) invoke("open_targets", { targets: c.action.open }).catch((e) => toast("Couldn't open " + e));
     else if (c.manual) markGoal(c.id, "done");
   },
+  settings: () => { if (S.sheet) S.sheet = null; else openSettings(); },
+  provider: (id) => { S.sheet.settings.ai.provider = id; S.sheet.test = null; saveSettings(); },
+  savekey: (name) => {
+    const input = $("key-" + name);
+    const value = input?.value ?? "";
+    if (!value.trim()) return toast("Paste a key first");
+    invoke("set_secret", { name, value }).then(() => { S.sheet.secrets[name] = true; toast("Saved"); render(); }, (e) => toast(String(e)));
+  },
+  clearkey: (name) => {
+    invoke("set_secret", { name, value: "" }).then(() => { S.sheet.secrets[name] = false; toast("Cleared"); render(); });
+  },
+  aitest: () => {
+    S.sheet.test = { ok: true, text: "Testing…" };
+    invoke("ai_test").then(
+      (reply) => { S.sheet.test = { ok: true, text: "Connected · model replied “" + reply.slice(0, 40) + "”" }; render(); },
+      (e) => { S.sheet.test = { ok: false, text: String(e) }; render(); },
+    );
+  },
+  datadir: () => invoke("open_data_dir"),
   editgoals: () => { invoke("edit_goals").catch(() => {}); toast("Opened goals.json · changes show next time"); },
   snoozemenu: () => (S.snoozeOpen = !S.snoozeOpen),
   snooze: (label) => {
@@ -409,6 +520,7 @@ document.addEventListener("click", (e) => {
   }
   // Clicking empty space closes whatever is open, then the overlay itself.
   if (e.target.id === "stage") {
+    if (S.sheet) { S.sheet = null; render(); return; }
     if (S.pop || S.cmdOpen || S.snoozeOpen) { S.pop = null; S.cmdOpen = false; S.snoozeOpen = false; render(); }
     else hide();
   }
@@ -416,6 +528,7 @@ document.addEventListener("click", (e) => {
 
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") {
+    if (S.sheet) { S.sheet = null; render(); return; }
     if (S.pop || S.cmdOpen || S.snoozeOpen) { S.pop = null; S.cmdOpen = false; S.snoozeOpen = false; render(); }
     else hide();
   } else if (e.key === "Enter" && e.target.id === "note") {
@@ -434,7 +547,14 @@ document.addEventListener("input", (e) => {
     filterCmd(e.target.value);
   }
 });
-document.addEventListener("change", (e) => { if (e.target.id === "vol") renderDeck(timer()); });
+document.addEventListener("change", (e) => {
+  const key = e.target.dataset?.set;
+  if (key && S.sheet) {
+    setPath(S.sheet.settings, key, e.target.type === "checkbox" ? e.target.checked : e.target.value.trim());
+    saveSettings();
+    if (e.target.type === "checkbox") render();
+    return;
+  } if (e.target.id === "vol") renderDeck(timer()); });
 
 // Clock + timer: cheap partial updates once a second.
 setInterval(() => {
@@ -496,7 +616,7 @@ tauri?.event?.listen("overlay:shown", () => {
   loadTimeline();
   loadSystem();
   loadGoals();
-  S.pop = null; S.cmdOpen = false; S.snoozeOpen = false;
+  S.pop = null; S.cmdOpen = false; S.snoozeOpen = false; S.sheet = null;
   render();
   enter();
 });

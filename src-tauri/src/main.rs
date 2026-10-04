@@ -1,8 +1,12 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod ai;
 mod deck;
 mod goals;
 mod nudge;
+#[cfg(windows)]
+mod secrets;
+mod settings;
 mod store;
 #[cfg(windows)]
 mod system;
@@ -168,6 +172,53 @@ fn edit_goals(app: AppHandle) -> Result<(), String> {
     system::open(&goals::path(&dir).to_string_lossy())
 }
 
+#[derive(serde::Serialize)]
+struct SettingsView {
+    settings: settings::Settings,
+    /// Which secrets are stored. Values never leave the backend.
+    secrets: std::collections::HashMap<&'static str, bool>,
+    data_dir: String,
+}
+
+#[tauri::command]
+fn get_settings(app: AppHandle) -> Result<SettingsView, String> {
+    let dir = data_dir(&app)?;
+    Ok(SettingsView {
+        settings: settings::load(&dir),
+        secrets: secrets::NAMES.iter().map(|n| (*n, secrets::has(n))).collect(),
+        data_dir: dir.to_string_lossy().into_owned(),
+    })
+}
+
+#[tauri::command]
+fn save_settings(app: AppHandle, settings: settings::Settings) -> Result<(), String> {
+    use tauri_plugin_autostart::ManagerExt;
+    let launcher = app.autolaunch();
+    if settings.autostart != launcher.is_enabled().unwrap_or(false) {
+        if settings.autostart { launcher.enable() } else { launcher.disable() }.map_err(|e| e.to_string())?;
+    }
+    settings::save(&data_dir(&app)?, &settings)
+}
+
+#[tauri::command]
+fn set_secret(name: String, value: String) -> Result<(), String> {
+    if !secrets::NAMES.contains(&name.as_str()) {
+        return Err(format!("unknown secret {name}"));
+    }
+    if value.trim().is_empty() { secrets::clear(&name) } else { secrets::set(&name, value.trim()) }
+}
+
+#[tauri::command]
+fn ai_test(app: AppHandle) -> Result<String, String> {
+    let s = settings::load(&data_dir(&app)?);
+    ai::chat(&s.ai, "You are a connection test. Reply with exactly: OK", "ping")
+}
+
+#[tauri::command]
+fn open_data_dir(app: AppHandle) -> Result<(), String> {
+    system::open(&data_dir(&app)?.to_string_lossy())
+}
+
 #[tauri::command]
 fn open_targets(targets: Vec<String>) -> Result<(), String> {
     let failed: Vec<String> = targets.iter().filter_map(|t| system::open(t).err()).collect();
@@ -210,6 +261,10 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _, _| show(app)))
         .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            Some(vec!["--hidden"]),
+        ))
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(|app, shortcut, event| {
@@ -231,6 +286,11 @@ fn main() {
             mark_goal,
             snooze_goal,
             edit_goals,
+            get_settings,
+            save_settings,
+            set_secret,
+            ai_test,
+            open_data_dir,
             open_targets,
             audio_state,
             set_volume,
@@ -281,7 +341,10 @@ fn main() {
                 disable_dwm_transitions(&win);
             }
 
-            show(app.handle());
+            // Launched at login: stay in the tray until summoned.
+            if !std::env::args().any(|a| a == "--hidden") {
+                show(app.handle());
+            }
             Ok(())
         })
         .on_window_event(|win, event| match event {
