@@ -39,6 +39,7 @@ const ICON = {
   left: '<path d="M15 6l-6 6 6 6"/>',
   right: '<path d="M9 6l6 6-6 6"/>',
   trash: '<path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/>',
+  pin: '<path d="M9 4h6l-1 6 3 3H7l3-3zM12 13v7"/>',
   lock: '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>',
 };
 const svg = (name, size = 22, sw = 1.8) =>
@@ -101,12 +102,12 @@ const store = {
 
 const S = {
   goals: tauri ? null : SAMPLE_GOALS, tasks: tauri ? null : SAMPLE_TASKS, tab: "today", snoozeOpen: false, cmdOpen: false,
-  focusUntil: null, micMuted: false,
+  focusUntil: store.get("focusUntil", null), micMuted: false,
   notes: store.get("notes", ["Ask Client X about the API keys"]),
   page: Number(store.get("page", 0)) || 0, pop: null, volume: 50,
   editDeck: false, editTile: null, addKind: "apps", apps: null, appQuery: "", icons: {},
   deckCfg: tauri ? null : SAMPLE_DECK,
-  timerEnd: null, toast: "",
+  timerEnd: store.get("timerEnd", null), toast: "",
   timeline: tauri ? null : SAMPLE_TIMELINE,
   sheet: null,
 };
@@ -205,6 +206,9 @@ function commands() {
     ["Snip a screenshot", "Tool", "shell:screenshot"],
     ["Clipboard history", "Tool", "shell:clipboard"],
     ["Lock PC", "Tool", "shell:lock"],
+    ["Pin Up next widget", "Widget", "pin:next"],
+    ["Pin Timer widget", "Widget", "pin:timer"],
+    ["Pin Notes widget", "Widget", "pin:notes"],
     ["Edit goals", "Settings", "editgoals"],
     ["Edit deck", "Settings", "edit"],
   ];
@@ -298,12 +302,12 @@ function renderRight(q) {
   }
   const then = q.slice(1, 3);
   $("right").innerHTML = `
-    <span class="label">Up next</span>
+    <div class="labelrow"><span class="label">Up next</span><button class="pinbtn" data-act="pin" data-arg="next" aria-label="Pin Up next as a widget">${svg("pin", 14, 2)}</button></div>
     ${next}
     ${then.length ? `<div class="then"><small>Then</small>${then.map((g) => `<div><i style="background:${g.missing ? "var(--red)" : g.color}"></i><b>${esc(g.name)}</b><small>${esc(g.snoozed ? "Snoozed · " + g.snoozed : g.isTask ? g.dueText : g.due ? "Due " + g.due : "Today")}</small></div>`).join("")}</div>` : ""}
     <div class="notes">
-      <span class="label">Quick note</span>
-      ${S.notes.map((n) => `<div class="note">${esc(n)}</div>`).join("")}
+      <div class="labelrow"><span class="label">Quick note</span><button class="pinbtn" data-act="pin" data-arg="notes" aria-label="Pin notes as a widget">${svg("pin", 14, 2)}</button></div>
+      ${S.notes.slice(0, 3).map((n) => `<div class="note">${esc(n)}</div>`).join("")}
       <div class="noteform"><input id="note" type="text" placeholder="Jot something…" aria-label="Quick note"><button class="primary" data-act="note" aria-label="Add note">${svg("plus", 16, 2.4)}</button></div>
     </div>`;
 }
@@ -494,6 +498,7 @@ function renderPop(t) {
       <p>Default output device</p>`;
   } else if (S.pop === "timer") {
     el.innerHTML = `<header>Timer <span id="timertext">${t.text}</span></header>
+      <button class="pinbtn inpop" data-act="pin" data-arg="timer">${svg("pin", 14, 2)} Pin as widget</button>
       <div class="grid4">${[5, 15, 25, 50].map((m) => `<button data-act="timer" data-arg="${m}">${m}m</button>`).join("")}</div>
       ${t.running ? `<button class="pill primary" data-act="timerstop">Stop timer</button>` : ""}
       <p>Timers count as proof for manual goals like “Read 30 min”.</p>`;
@@ -604,6 +609,8 @@ function renderToast() {
 }
 
 function render() {
+  store.set("timerEnd", S.timerEnd);
+  store.set("focusUntil", S.focusUntil);
   const gs = goals();
   const q = queue(gs);
   const t = timer();
@@ -633,7 +640,7 @@ function addNote() {
   const input = $("note");
   const text = input.value.trim();
   if (!text) return;
-  S.notes = [text, ...S.notes].slice(0, 3);
+  S.notes = [text, ...S.notes].slice(0, 12);
   store.set("notes", S.notes);
 }
 // ---------- open / close ----------
@@ -794,6 +801,10 @@ const ACTIONS = {
   timer: (m) => (S.timerEnd = Date.now() + Number(m) * 60000),
   timerstop: () => (S.timerEnd = null),
   toast: (text) => toast(text),
+  pin: (kind) => {
+    if (!tauri) return toast("Widgets open in the app");
+    invoke("pin_widget", { kind }).then(() => toast("Pinned · drag it anywhere"), (e) => toast(String(e)));
+  },
 };
 
 document.addEventListener("click", (e) => {
@@ -946,6 +957,13 @@ tauri?.event?.listen("overlay:shown", () => {
   enter();
 });
 tauri?.event?.listen("overlay:hide", hide);
+// Widgets share timer and notes through localStorage.
+window.addEventListener("storage", (e) => {
+  if (e.key === "notes") S.notes = store.get("notes", []);
+  else if (e.key === "timerEnd") S.timerEnd = store.get("timerEnd", null);
+  else return;
+  render();
+});
 tauri?.event?.listen("outlook:done", (e) => {
   if (!S.sheet) return;
   S.sheet.signin = null;

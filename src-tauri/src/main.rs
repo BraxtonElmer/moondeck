@@ -20,6 +20,7 @@ mod system;
 mod timeline;
 #[cfg(windows)]
 mod tracker;
+mod widgets;
 
 use std::{
     sync::{
@@ -301,6 +302,16 @@ fn outlook_sign_out(app: AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn pin_widget(app: AppHandle, kind: String) -> Result<(), String> {
+    widgets::open(&app, &kind)
+}
+
+#[tauri::command]
+fn close_widget(app: AppHandle, kind: String) {
+    widgets::close(&app, &kind);
+}
+
+#[tauri::command]
 fn open_targets(targets: Vec<String>) -> Result<(), String> {
     let failed: Vec<String> = targets.iter().filter_map(|t| system::open(t).err()).collect();
     if failed.is_empty() { Ok(()) } else { Err(failed.join(", ")) }
@@ -375,6 +386,8 @@ fn main() {
             mail_check,
             outlook_sign_in,
             outlook_sign_out,
+            pin_widget,
+            close_widget,
             get_settings,
             save_settings,
             set_secret,
@@ -432,20 +445,30 @@ fn main() {
                 disable_dwm_transitions(&win);
             }
 
+            widgets::restore(app.handle());
+
             // Launched at login: stay in the tray until summoned.
             if !std::env::args().any(|a| a == "--hidden") {
                 show(app.handle());
             }
             Ok(())
         })
-        .on_window_event(|win, event| match event {
-            // Overlay behaves like a popup: losing focus sends it back to the tray.
-            WindowEvent::Focused(false) => request_hide(win.app_handle()),
-            WindowEvent::CloseRequested { api, .. } => {
-                api.prevent_close();
-                request_hide(win.app_handle());
+        .on_window_event(|win, event| {
+            if win.label() != OVERLAY {
+                if let WindowEvent::Moved(pos) = event {
+                    widgets::moved(win.app_handle(), win.label(), *pos);
+                }
+                return;
             }
-            _ => {}
+            match event {
+                // Overlay behaves like a popup: losing focus sends it back to the tray.
+                WindowEvent::Focused(false) => request_hide(win.app_handle()),
+                WindowEvent::CloseRequested { api, .. } => {
+                    api.prevent_close();
+                    request_hide(win.app_handle());
+                }
+                _ => {}
+            }
         })
         .run(tauri::generate_context!())
         .expect("failed to start moondeck");
