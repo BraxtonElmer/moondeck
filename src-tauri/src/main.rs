@@ -2,7 +2,9 @@
 
 mod ai;
 mod deck;
+mod detect;
 mod goals;
+mod notifications;
 mod nudge;
 #[cfg(windows)]
 mod secrets;
@@ -220,6 +222,20 @@ fn open_data_dir(app: AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn tasks_open(store: tauri::State<Arc<Store>>) -> Result<Vec<store::Task>, String> {
+    store.open_tasks().map_err(|e| e.to_string())
+}
+
+/// `status`: "done" or "dismissed".
+#[tauri::command]
+fn set_task_status(store: tauri::State<Arc<Store>>, id: i64, status: String) -> Result<(), String> {
+    if !matches!(status.as_str(), "done" | "dismissed" | "open") {
+        return Err(format!("bad status {status}"));
+    }
+    store.set_task_status(id, &status).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 fn open_targets(targets: Vec<String>) -> Result<(), String> {
     let failed: Vec<String> = targets.iter().filter_map(|t| system::open(t).err()).collect();
     if failed.is_empty() { Ok(()) } else { Err(failed.join(", ")) }
@@ -286,6 +302,8 @@ fn main() {
             mark_goal,
             snooze_goal,
             edit_goals,
+            tasks_open,
+            set_task_status,
             get_settings,
             save_settings,
             set_secret,
@@ -305,6 +323,7 @@ fn main() {
             #[cfg(windows)]
             tracker::spawn(store.clone());
             nudge::spawn(app.handle().clone(), store.clone(), dir.clone());
+            notifications::spawn(store.clone(), dir.clone());
             app.manage(store);
 
             let open = MenuItem::with_id(app, "open", "Open  (Alt+Space)", true, None::<&str>)?;

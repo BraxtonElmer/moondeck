@@ -2,7 +2,8 @@
 
 use std::{path::Path, sync::Mutex};
 
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, OptionalExtension};
+use serde::Serialize;
 
 /// A piece of evidence. Spans (window focus, away time) have an `end`; point events don't.
 #[derive(Debug, Clone)]
@@ -39,7 +40,23 @@ impl Store {
                  detail  TEXT NOT NULL DEFAULT ''
              );
              CREATE INDEX IF NOT EXISTS signals_start ON signals(start);
-             CREATE INDEX IF NOT EXISTS signals_source ON signals(source, kind, start);",
+             CREATE INDEX IF NOT EXISTS signals_source ON signals(source, kind, start);
+             CREATE TABLE IF NOT EXISTS state (
+                 key   TEXT PRIMARY KEY,
+                 value TEXT NOT NULL
+             );
+             CREATE TABLE IF NOT EXISTS tasks (
+                 id      INTEGER PRIMARY KEY,
+                 created INTEGER NOT NULL,
+                 source  TEXT NOT NULL,
+                 ref     TEXT NOT NULL,
+                 app     TEXT NOT NULL DEFAULT '',
+                 title   TEXT NOT NULL,
+                 detail  TEXT NOT NULL DEFAULT '',
+                 due     INTEGER,
+                 status  TEXT NOT NULL DEFAULT 'open',
+                 UNIQUE (source, ref)
+             );",
         )?;
         Ok(Self { conn: Mutex::new(conn) })
     }
@@ -83,4 +100,82 @@ impl Store {
         })?;
         rows.collect()
     }
+
+    pub fn get_state(&self, key: &str) -> Option<String> {
+        self.conn
+            .lock()
+            .unwrap()
+            .query_row("SELECT value FROM state WHERE key = ?1", [key], |r| r.get(0))
+            .optional()
+            .ok()
+            .flatten()
+    }
+
+    pub fn set_state(&self, key: &str, value: &str) -> rusqlite::Result<()> {
+        self.conn.lock().unwrap().execute(
+            "INSERT INTO state (key, value) VALUES (?1, ?2) ON CONFLICT(key) DO UPDATE SET value = ?2",
+            params![key, value],
+        )?;
+        Ok(())
+    }
+
+    /// Add a detected task; returns false if this source/ref was already seen.
+    pub fn add_task(&self, t: &NewTask) -> rusqlite::Result<bool> {
+        let n = self.conn.lock().unwrap().execute(
+            "INSERT OR IGNORE INTO tasks (created, source, ref, app, title, detail, due) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![t.created, t.source, t.reference, t.app, t.title, t.detail, t.due],
+        )?;
+        Ok(n > 0)
+    }
+
+    /// Open tasks, soonest due first (undated last), newest first within that.
+    pub fn open_tasks(&self) -> rusqlite::Result<Vec<Task>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare_cached(
+            "SELECT id, created, source, app, title, detail, due FROM tasks WHERE status = 'open'
+             ORDER BY due IS NULL, due, created DESC LIMIT 100",
+        )?;
+        let rows = stmt.query_map([], |r| {
+            Ok(Task {
+                id: r.get(0)?,
+                created: r.get(1)?,
+                source: r.get(2)?,
+                app: r.get(3)?,
+                title: r.get(4)?,
+                detail: r.get(5)?,
+                due: r.get(6)?,
+            })
+        })?;
+        rows.collect()
+    }
+
+    pub fn set_task_status(&self, id: i64, status: &str) -> rusqlite::Result<()> {
+        self.conn
+            .lock()
+            .unwrap()
+            .execute("UPDATE tasks SET status = ?2 WHERE id = ?1", params![id, status])?;
+        Ok(())
+    }
+}
+
+pub struct NewTask {
+    pub created: i64,
+    pub source: String,
+    /// Source-specific id used to avoid duplicates (notification id, message id).
+    pub reference: String,
+    pub app: String,
+    pub title: String,
+    pub detail: String,
+    pub due: Option<i64>,
+}
+
+#[derive(Serialize, Clone)]
+pub struct Task {
+    pub id: i64,
+    pub created: i64,
+    pub source: String,
+    pub app: String,
+    pub title: String,
+    pub detail: String,
+    pub due: Option<i64>,
 }

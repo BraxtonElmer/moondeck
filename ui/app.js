@@ -42,6 +42,10 @@ const esc = (s) => String(s).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`)
 
 // ---------- data ----------
 // Shown only in a plain browser preview, where there's no engine to ask.
+const SAMPLE_TASKS = [
+  { id: 1, created: Date.now() / 1000 - 3600, source: "notification", app: "Teams", title: "Send the Q4 slides to Priya", detail: "Priya · via Teams", due: Date.now() / 1000 + 2 * 3600 },
+  { id: 2, created: Date.now() / 1000 - 7200, source: "notification", app: "WhatsApp", title: "Pay rent", detail: "Landlord · via WhatsApp", due: null },
+];
 const SAMPLE_GOALS = [
   { id: "commit", name: "Commit to moondeck", source: "git", detail: "No commit yet", due: "22:00", due_in: 3 * 3600 + 48 * 60, pct: 0, streak: 3, history: [true, false, true, true, true, false], action: { label: "Open project", open: [] } },
   { id: "code", name: "Code for 2 hours", source: "Window time", detail: "52 of 120 min", due: "23:00", due_in: 4 * 3600, pct: 43, streak: 1, history: [false, false, true, null, null, true] },
@@ -78,7 +82,7 @@ const store = {
 };
 
 const S = {
-  goals: tauri ? null : SAMPLE_GOALS, tab: "today", snoozeOpen: false, cmdOpen: false,
+  goals: tauri ? null : SAMPLE_GOALS, tasks: tauri ? null : SAMPLE_TASKS, tab: "today", snoozeOpen: false, cmdOpen: false,
   focusUntil: null, micMuted: false,
   notes: store.get("notes", ["Ask Client X about the API keys"]),
   deck: store.get("deck", "launch"), pop: null, volume: 50,
@@ -111,9 +115,37 @@ function goals() {
     };
   });
 }
+function tasks() {
+  const now = Date.now() / 1000;
+  return (S.tasks ?? []).map((t) => {
+    const due_in = t.due == null ? null : t.due - now;
+    return {
+      ...t,
+      isTask: true,
+      name: t.title,
+      due_in,
+      due: t.due == null ? null : fmt(new Date(t.due * 1000)),
+      dueText: t.due == null ? "No date" : whenText(t.due),
+      left: left(due_in),
+      kind: due_in != null && due_in < 0 ? "miss" : "prog",
+      tag: due_in != null && due_in < 0 ? "Overdue" : "From " + t.app,
+      color: "var(--accent)",
+      sub: t.detail,
+      source: t.app,
+      detail: t.detail,
+    };
+  });
+}
+// "Today 17:00", "Tomorrow 09:30", "Fri 9 Oct 23:59"
+function whenText(ts) {
+  const d = new Date(ts * 1000);
+  const days = Math.round((new Date(d).setHours(0, 0, 0, 0) - new Date().setHours(0, 0, 0, 0)) / 86400000);
+  const day = days === 0 ? "Today" : days === 1 ? "Tomorrow" : d.toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short" });
+  return `${day} ${fmt(d)}`;
+}
 function queue(gs) {
   const byDue = (a, b) => (a.due_in ?? 1e9) - (b.due_in ?? 1e9);
-  const active = gs.filter((g) => !g.done && !g.skipped);
+  const active = gs.filter((g) => !g.done && !g.skipped).concat(tasks().filter((t) => t.due_in != null));
   return active.filter((g) => !g.snoozed).sort(byDue).concat(active.filter((g) => g.snoozed).sort(byDue));
 }
 const fmt = (d) => d.toTimeString().slice(0, 5);
@@ -179,7 +211,8 @@ function tickIcon(g) {
   return `<svg width="24" height="24" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" class="ring-track" stroke-width="3"/><circle cx="12" cy="12" r="9" fill="none" stroke="${g.color}" stroke-width="3" stroke-linecap="round" stroke-dasharray="${(g.pct * 0.5655).toFixed(1)} 57" transform="rotate(-90 12 12)"/></svg>`;
 }
 function renderLeft(gs) {
-  const tabs = [["today", "Today"], ["timeline", "Timeline"], ["streaks", "Streaks"]]
+  const inboxCount = S.tasks?.length ? ` <small class="badge">${S.tasks.length}</small>` : "";
+  const tabs = [["today", "Today"], ["inbox", "Inbox" + inboxCount], ["timeline", "Timeline"], ["streaks", "Streaks"]]
     .map(([id, l]) => `<button class="${S.tab === id ? "on" : ""}" data-act="tab" data-arg="${id}">${l}</button>`).join("");
   let body = "";
   if (S.tab === "today") {
@@ -193,6 +226,18 @@ function renderLeft(gs) {
       <span class="spacer"></span>
       <button class="ghost" data-act="editgoals">+ New goal</button>
       <p class="foot">Tap a circle to mark done yourself</p></div>`;
+  } else if (S.tab === "inbox") {
+    const ts = tasks();
+    const rows = !S.tasks ? `<p class="foot">Loading…</p>`
+      : !ts.length ? `<p class="foot">Nothing detected yet. Tasks and deadlines from your notifications and email show up here.</p>
+        <button class="ghost" data-act="settings">Choose sources</button>`
+      : ts.map((t) => `
+      <div class="goal row">
+        <button class="tick" data-act="taskdone" data-arg="${t.id}" aria-label="Done: ${esc(t.title)}"><svg width="24" height="24" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="none" class="ring-track" stroke-width="2.4"/></svg></button>
+        <div><span class="name">${esc(t.title)}</span><span class="sub">${esc(t.detail)}</span></div>
+        <div class="meta"><span class="${t.due_in != null && t.due_in < 0 ? "late" : ""}">${esc(t.dueText)}</span><button class="x" data-act="taskdismiss" data-arg="${t.id}" aria-label="Dismiss: ${esc(t.title)}">Dismiss</button></div>
+      </div>`).join("");
+    body = `<div class="list">${rows}<span class="spacer"></span><p class="foot">Found by local rules${S.aiOn ? " + AI" : ""} · nothing leaves your PC${S.aiOn ? " except to your AI provider" : ""}</p></div>`;
   } else if (S.tab === "timeline") {
     const tl = S.timeline;
     const max = Math.max(1, ...(tl?.entries ?? []).map((e) => e.secs));
@@ -216,16 +261,16 @@ function renderRight(q) {
   const c = q[0];
   let next;
   if (c) {
-    const action = c.action?.label ?? (c.manual ? "Mark done" : null);
+    const action = c.isTask ? null : c.action?.label ?? (c.manual ? "Mark done" : null);
     next = `<div class="next">
       <span class="tag ${c.kind}">${esc(c.tag)}</span>
-      <div><h2>${esc(c.name)}</h2><p>${esc(c.source)} · ${esc(c.detail)} · <b>${esc(c.due ? c.left + " · " + c.due : "today")}</b></p></div>
+      <div><h2>${esc(c.name)}</h2><p>${esc(c.isTask ? c.detail : c.source + " · " + c.detail)} · <b>${esc(c.due ? c.left + " · " + c.due : "today")}</b></p></div>
       ${action ? `<button class="pill primary" data-act="primary">${esc(action)}</button>` : ""}
       <div class="pair">
         <button class="pill" data-act="done">Done</button>
-        <button class="pill${S.snoozeOpen ? " on" : ""}" data-act="snoozemenu">Later ▾</button>
+        ${c.isTask ? `<button class="pill" data-act="taskdismiss" data-arg="${c.id}">Dismiss</button>` : `<button class="pill${S.snoozeOpen ? " on" : ""}" data-act="snoozemenu">Later ▾</button>`}
       </div>
-      ${S.snoozeOpen ? `<div class="grid2">${["15 min", "1 hour", "Tonight", "Skip today"].map((l) => `<button data-act="snooze" data-arg="${l}">${l}</button>`).join("")}</div>` : ""}
+      ${S.snoozeOpen && !c.isTask ? `<div class="grid2">${["15 min", "1 hour", "Tonight", "Skip today"].map((l) => `<button data-act="snooze" data-arg="${l}">${l}</button>`).join("")}</div>` : ""}
     </div>`;
   } else {
     next = `<div class="clear"><h2>All clear</h2><p>${S.goals?.length ? "Every goal has proof today." : "Add a goal to get started."}</p></div>`;
@@ -234,7 +279,7 @@ function renderRight(q) {
   $("right").innerHTML = `
     <span class="label">Up next</span>
     ${next}
-    ${then.length ? `<div class="then"><small>Then</small>${then.map((g) => `<div><i style="background:${g.missing ? "var(--red)" : g.color}"></i><b>${esc(g.name)}</b><small>${esc(g.snoozed ? "Snoozed · " + g.snoozed : g.due ? "Due " + g.due : "Today")}</small></div>`).join("")}</div>` : ""}
+    ${then.length ? `<div class="then"><small>Then</small>${then.map((g) => `<div><i style="background:${g.missing ? "var(--red)" : g.color}"></i><b>${esc(g.name)}</b><small>${esc(g.snoozed ? "Snoozed · " + g.snoozed : g.isTask ? g.dueText : g.due ? "Due " + g.due : "Today")}</small></div>`).join("")}</div>` : ""}
     <div class="notes">
       <span class="label">Quick note</span>
       ${S.notes.map((n) => `<div class="note">${esc(n)}</div>`).join("")}
@@ -451,7 +496,14 @@ const ACTIONS = {
     const g = S.goals?.find((x) => x.id === id);
     if (g) markGoal(id, g.done ? "undo" : "done");
   },
-  done: () => { const c = queue(goals())[0]; if (c) markGoal(c.id, "done"); S.snoozeOpen = false; },
+  done: () => {
+    const c = queue(goals())[0];
+    S.snoozeOpen = false;
+    if (c?.isTask) setTask(c.id, "done");
+    else if (c) markGoal(c.id, "done");
+  },
+  taskdone: (id) => setTask(Number(id), "done"),
+  taskdismiss: (id) => setTask(Number(id), "dismissed"),
   primary: () => {
     const c = queue(goals())[0];
     if (!c) return;
@@ -591,6 +643,16 @@ function markGoal(id, kind) {
   invoke("mark_goal", { id, kind }).then(loadGoals);
 }
 
+async function loadTasks() {
+  if (!tauri) return;
+  const ts = await invoke("tasks_open").catch(() => null);
+  if (ts) { S.tasks = ts; render(); }
+}
+function setTask(id, status) {
+  S.tasks = (S.tasks ?? []).filter((t) => t.id !== id);
+  if (tauri) invoke("set_task_status", { id, status }).then(loadTasks);
+}
+
 async function loadSystem() {
   if (!tauri) return;
   const [cfg, audio] = await Promise.all([
@@ -599,6 +661,7 @@ async function loadSystem() {
   ]);
   if (cfg) S.deckCfg = cfg;
   if (audio) { S.volume = audio.volume; S.micMuted = audio.mic_muted; }
+  invoke("get_settings").then((v) => { S.aiOn = v.settings.ai.provider !== "off"; }, () => {});
   renderDeck(timer());
 }
 
@@ -616,6 +679,7 @@ tauri?.event?.listen("overlay:shown", () => {
   loadTimeline();
   loadSystem();
   loadGoals();
+  loadTasks();
   S.pop = null; S.cmdOpen = false; S.snoozeOpen = false; S.sheet = null;
   render();
   enter();
@@ -627,4 +691,5 @@ syncAccent();
 loadTimeline();
 loadSystem();
 loadGoals();
+loadTasks();
 enter();

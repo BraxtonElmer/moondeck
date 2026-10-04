@@ -68,3 +68,32 @@ pub fn chat(ai: &Ai, system: &str, user: &str) -> Result<String, String> {
         .map(|s| s.trim().to_string())
         .ok_or_else(|| "empty reply".into())
 }
+
+pub struct Extracted {
+    pub title: String,
+    pub due: Option<i64>,
+}
+
+/// Ask the model whether `text` is something the user has to do, and by when.
+/// `Ok(None)` means "not a task".
+pub fn extract_task(ai: &Ai, text: &str, now: chrono::DateTime<chrono::Local>) -> Result<Option<Extracted>, String> {
+    let system = format!(
+        "You read short messages and notifications and decide if they ask the reader to do something. \
+         The current local time is {}. Reply with JSON only: \
+         {{\"task\": true|false, \"title\": \"short imperative task title\", \"due\": \"YYYY-MM-DDTHH:MM\" or null}}. \
+         Chit-chat, promotions and status updates are not tasks.",
+        now.format("%A %Y-%m-%d %H:%M")
+    );
+    let reply = chat(ai, &system, text)?;
+    let json = reply.trim().trim_start_matches("```json").trim_start_matches("```").trim_end_matches("```").trim();
+    let v: Value = serde_json::from_str(json).map_err(|e| format!("bad reply: {e}"))?;
+    if !v["task"].as_bool().unwrap_or(false) {
+        return Ok(None);
+    }
+    let due = v["due"]
+        .as_str()
+        .and_then(|d| chrono::NaiveDateTime::parse_from_str(d, "%Y-%m-%dT%H:%M").ok())
+        .and_then(|d| d.and_local_timezone(chrono::Local).earliest())
+        .map(|d| d.timestamp());
+    Ok(Some(Extracted { title: v["title"].as_str().unwrap_or(text).to_string(), due }))
+}
