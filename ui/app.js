@@ -401,7 +401,14 @@ function renderSheet() {
       </div>${keyStatus("gmail")}` : ""}
       <div class="set-row"><div>Outlook / Microsoft 365<small>Signs in with your Microsoft account using your own Azure app registration.</small></div>${sw("outlook.enabled", st.outlook.enabled)}</div>
       ${st.outlook.enabled ? `
-      <label class="field">Application (client) ID<input data-set="outlook.client_id" value="${esc(st.outlook.client_id)}" placeholder="00000000-0000-0000-0000-000000000000"></label>` : ""}
+      <label class="field">Application (client) ID<input data-set="outlook.client_id" value="${esc(st.outlook.client_id)}" placeholder="00000000-0000-0000-0000-000000000000"></label>
+      <span class="status">Azure portal › App registrations › New. Allow public client flows, add the Mail.Read permission.</span>
+      ${S.sheet.secrets.outlook
+        ? `<div class="set-row"><span class="status ok">${esc(st.outlook.account || "Signed in")}</span><button class="btn" data-act="outlookout">Sign out</button></div>`
+        : S.sheet.signin
+          ? `<div class="set-row"><span class="status">Enter <b class="code">${esc(S.sheet.signin.user_code)}</b> at ${esc(S.sheet.signin.verification_uri)} (opened in your browser)</span></div>`
+          : `<div class="set-row"><span class="status">Not signed in</span><button class="btn primary" data-act="outlookin">Sign in</button></div>`}` : ""}
+      ${st.gmail.enabled || st.outlook.enabled ? `<div class="set-row"><span class="status${S.sheet.mail ? (S.sheet.mail.ok ? " ok" : " bad") : ""}">${esc(S.sheet.mail?.text ?? "Checks every 5 minutes")}</span><button class="btn" data-act="mailcheck">Check now</button></div>` : ""}
     </section>
 
     <section>
@@ -529,6 +536,20 @@ const ACTIONS = {
     );
   },
   datadir: () => invoke("open_data_dir"),
+  mailcheck: () => {
+    S.sheet.mail = { ok: true, text: "Checking…" };
+    invoke("mail_check").then(
+      (text) => { S.sheet.mail = { ok: true, text }; render(); loadTasks(); },
+      (e) => { S.sheet.mail = { ok: false, text: String(e) }; render(); },
+    );
+  },
+  outlookin: () => {
+    invoke("outlook_sign_in").then(
+      (code) => { S.sheet.signin = code; render(); },
+      (e) => { S.sheet.mail = { ok: false, text: String(e) }; render(); },
+    );
+  },
+  outlookout: () => invoke("outlook_sign_out").then(openSettings),
   editgoals: () => { invoke("edit_goals").catch(() => {}); toast("Opened goals.json · changes show next time"); },
   snoozemenu: () => (S.snoozeOpen = !S.snoozeOpen),
   snooze: (label) => {
@@ -685,6 +706,12 @@ tauri?.event?.listen("overlay:shown", () => {
   enter();
 });
 tauri?.event?.listen("overlay:hide", hide);
+tauri?.event?.listen("outlook:done", (e) => {
+  if (!S.sheet) return;
+  S.sheet.signin = null;
+  S.sheet.mail = e.payload;
+  openSettings().then(() => { if (S.sheet) { S.sheet.mail = e.payload; render(); } });
+});
 
 render();
 syncAccent();

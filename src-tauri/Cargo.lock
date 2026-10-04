@@ -2199,8 +2199,10 @@ dependencies = [
 name = "moondeck"
 version = "0.1.0"
 dependencies = [
+ "base64 0.22.1",
  "chrono",
  "rusqlite",
+ "rustls",
  "serde",
  "serde_json",
  "tauri",
@@ -2210,6 +2212,7 @@ dependencies = [
  "tauri-plugin-notification",
  "tauri-plugin-single-instance",
  "ureq",
+ "webpki-roots",
  "windows",
  "windows-registry",
 ]

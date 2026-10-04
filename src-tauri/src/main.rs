@@ -4,6 +4,9 @@ mod ai;
 mod deck;
 mod detect;
 mod goals;
+mod imap;
+mod inbox;
+mod mail;
 mod notifications;
 mod nudge;
 #[cfg(windows)]
@@ -236,6 +239,47 @@ fn set_task_status(store: tauri::State<Arc<Store>>, id: i64, status: String) -> 
 }
 
 #[tauri::command]
+fn mail_check(app: AppHandle, store: tauri::State<Arc<Store>>) -> Result<String, String> {
+    mail::check(&store, &data_dir(&app)?)
+}
+
+/// Start Microsoft sign-in: returns the code to type at the verification page (opened for you),
+/// then waits in the background and emits `outlook:done` with the result.
+#[tauri::command]
+fn outlook_sign_in(app: AppHandle) -> Result<serde_json::Value, String> {
+    let dir = data_dir(&app)?;
+    let client_id = settings::load(&dir).outlook.client_id;
+    let code = mail::outlook_start(&client_id)?;
+    let view = serde_json::json!({ "user_code": code.user_code, "verification_uri": code.verification_uri });
+    let _ = system::open(&code.verification_uri);
+    std::thread::spawn(move || {
+        let result = mail::outlook_finish(&client_id, &code);
+        if let Ok(account) = &result {
+            let mut s = settings::load(&dir);
+            s.outlook.account = account.clone();
+            let _ = settings::save(&dir, &s);
+        }
+        let _ = app.emit(
+            "outlook:done",
+            match result {
+                Ok(account) => serde_json::json!({ "ok": true, "text": format!("Signed in as {account}") }),
+                Err(e) => serde_json::json!({ "ok": false, "text": e }),
+            },
+        );
+    });
+    Ok(view)
+}
+
+#[tauri::command]
+fn outlook_sign_out(app: AppHandle) -> Result<(), String> {
+    let dir = data_dir(&app)?;
+    secrets::clear("outlook")?;
+    let mut s = settings::load(&dir);
+    s.outlook.account.clear();
+    settings::save(&dir, &s)
+}
+
+#[tauri::command]
 fn open_targets(targets: Vec<String>) -> Result<(), String> {
     let failed: Vec<String> = targets.iter().filter_map(|t| system::open(t).err()).collect();
     if failed.is_empty() { Ok(()) } else { Err(failed.join(", ")) }
@@ -304,6 +348,9 @@ fn main() {
             edit_goals,
             tasks_open,
             set_task_status,
+            mail_check,
+            outlook_sign_in,
+            outlook_sign_out,
             get_settings,
             save_settings,
             set_secret,
@@ -324,6 +371,7 @@ fn main() {
             tracker::spawn(store.clone());
             nudge::spawn(app.handle().clone(), store.clone(), dir.clone());
             notifications::spawn(store.clone(), dir.clone());
+            mail::spawn(store.clone(), dir.clone());
             app.manage(store);
 
             let open = MenuItem::with_id(app, "open", "Open  (Alt+Space)", true, None::<&str>)?;

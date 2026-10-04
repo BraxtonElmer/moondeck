@@ -18,6 +18,9 @@ chrono = { version = "0.4.45", default-features = false, features = ["clock"] }
 tauri-plugin-notification = "2.5.1"
 ureq = { version = "3.4.2", features = ["json"] }
 tauri-plugin-autostart = "2.7.0"
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+webpki-roots = "1"
+base64 = "0.22"
 
 [target.'cfg(windows)'.dependencies]
 windows-registry = "0.6"

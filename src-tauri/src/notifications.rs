@@ -4,11 +4,10 @@
 
 use std::{path::PathBuf, sync::Arc, time::Duration};
 
-use chrono::Local;
 use rusqlite::{Connection, OpenFlags};
 
 use crate::{
-    ai, detect, settings,
+    inbox, settings,
     store::{NewTask, Signal, Store},
 };
 
@@ -108,47 +107,22 @@ fn is_own(handler: &str) -> bool {
 }
 
 fn to_task(t: &Toast, app: &str, s: &settings::Settings) -> Option<NewTask> {
-    let text = t.texts.join(". ");
-    let found = detect::detect(&text, Local::now())?;
     // First line is usually the sender or headline; the rest is the message.
     let (head, body) = match t.texts.as_slice() {
         [only] => (String::new(), only.clone()),
         [head, rest @ ..] => (head.clone(), rest.join(" ")),
         [] => return None,
     };
-    let mut title = shorten(&body, 90);
-    let mut due = found.due;
-
-    // The LLM, if configured, gets the final say on whether this is a task and when it's due.
-    if ai::enabled(&s.ai) {
-        match ai::extract_task(&s.ai, &text, Local::now()) {
-            Ok(Some(x)) => {
-                title = shorten(&x.title, 90);
-                due = x.due.or(due);
-            }
-            Ok(None) => return None,
-            Err(e) => eprintln!("ai: {e}"),
-        }
-    }
+    let c = inbox::classify(&t.texts.join(". "), &body, s)?;
     Some(NewTask {
         created: t.arrived,
         source: "notification".into(),
         reference: format!("{}:{}", t.id, t.arrived),
         app: app.to_string(),
-        title,
+        title: c.title,
         detail: if head.is_empty() { format!("via {app}") } else { format!("{head} · via {app}") },
-        due,
+        due: c.due,
     })
-}
-
-fn shorten(s: &str, n: usize) -> String {
-    let s = s.trim();
-    if s.chars().count() <= n {
-        return s.to_string();
-    }
-    let mut out: String = s.chars().take(n - 1).collect();
-    out.push('…');
-    out
 }
 
 /// Windows FILETIME (100 ns ticks since 1601) to unix seconds.
