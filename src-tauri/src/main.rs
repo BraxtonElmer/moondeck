@@ -1,6 +1,8 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod deck;
+mod goals;
+mod nudge;
 mod store;
 #[cfg(windows)]
 mod system;
@@ -140,6 +142,33 @@ fn edit_deck(app: AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn goals_today(app: AppHandle, store: tauri::State<Arc<Store>>) -> Result<Vec<goals::Status>, String> {
+    let cfg = goals::load(&data_dir(&app)?)?;
+    Ok(goals::today(&store, &cfg))
+}
+
+/// `kind`: "done", "undo" or "skip".
+#[tauri::command]
+fn mark_goal(store: tauri::State<Arc<Store>>, id: String, kind: String) -> Result<(), String> {
+    goals::mark(&store, &id, &kind).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn snooze_goal(store: tauri::State<Arc<Store>>, id: String, label: String) -> Result<(), String> {
+    if label == "Skip today" {
+        return goals::mark(&store, &id, "skip").map_err(|e| e.to_string());
+    }
+    goals::snooze(&store, &id, goals::snooze_until(&label), &label).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn edit_goals(app: AppHandle) -> Result<(), String> {
+    let dir = data_dir(&app)?;
+    goals::load(&dir)?;
+    system::open(&goals::path(&dir).to_string_lossy())
+}
+
+#[tauri::command]
 fn open_targets(targets: Vec<String>) -> Result<(), String> {
     let failed: Vec<String> = targets.iter().filter_map(|t| system::open(t).err()).collect();
     if failed.is_empty() { Ok(()) } else { Err(failed.join(", ")) }
@@ -180,6 +209,7 @@ fn shell_action(app: AppHandle, action: String) {
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _, _| show(app)))
+        .plugin(tauri_plugin_notification::init())
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(|app, shortcut, event| {
@@ -197,6 +227,10 @@ fn main() {
             timeline,
             deck_config,
             edit_deck,
+            goals_today,
+            mark_goal,
+            snooze_goal,
+            edit_goals,
             open_targets,
             audio_state,
             set_volume,
@@ -210,6 +244,7 @@ fn main() {
             let store = Arc::new(Store::open(&dir.join("moondeck.db"))?);
             #[cfg(windows)]
             tracker::spawn(store.clone());
+            nudge::spawn(app.handle().clone(), store.clone(), dir.clone());
             app.manage(store);
 
             let open = MenuItem::with_id(app, "open", "Open  (Alt+Space)", true, None::<&str>)?;

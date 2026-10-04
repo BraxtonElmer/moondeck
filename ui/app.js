@@ -41,13 +41,12 @@ const svg = (name, size = 22, sw = 1.8) =>
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 
 // ---------- data ----------
-// Sample goals until real signal sources are wired in.
-const GOALS = [
-  { id: "genshin", name: "Genshin dailies", src: "HoYoLAB", detail: "3 of 4 commissions", due: "19:00", left: "48m left", short: "Genshin · 48m", pct: 75, color: "#f08c00", streak: 5, tag: "Almost there", title: "1 commission left", action: "Launch game" },
-  { id: "side", name: "Side-project commit", src: "git", detail: "No commit yet", due: "22:00", left: "3h 48m left", short: "Side-project · 3h 48m", pct: 0, color: "#e03131", streak: 3, tag: "Missing proof", title: "Commit to side-project", action: "Open workspace" },
-  { id: "blender", name: "Blender practice", src: "Window time", detail: "20 of 45 min", due: "23:00", left: "25m to go", short: "Blender · 25m", pct: 44, color: "#4263eb", streak: 1, tag: "In progress", title: "25 more minutes in Blender", action: "Open Blender" },
-  { id: "read", name: "Read 30 min", src: "Manual", detail: "Not checked yet", due: "Any time", left: "today", short: "Read · today", pct: 0, color: "#2f9e44", streak: 12, tag: "Manual goal", title: "Read for 30 minutes", action: "Start 30m timer", manual: true },
-];
+// Shown only in a plain browser preview, where there's no engine to ask.
+const SAMPLE_GOALS = [
+  { id: "commit", name: "Commit to moondeck", source: "git", detail: "No commit yet", due: "22:00", due_in: 3 * 3600 + 48 * 60, pct: 0, streak: 3, history: [true, false, true, true, true, false], action: { label: "Open project", open: [] } },
+  { id: "code", name: "Code for 2 hours", source: "Window time", detail: "52 of 120 min", due: "23:00", due_in: 4 * 3600, pct: 43, streak: 1, history: [false, false, true, null, null, true] },
+  { id: "read", name: "Read 30 min", source: "Manual", detail: "Checked by you", due: null, due_in: null, pct: 100, done: true, by_hand: true, manual: true, streak: 12, history: [true, true, true, true, true, true] },
+].map((g) => ({ done: false, by_hand: false, skipped: false, manual: false, scheduled: true, snoozed: null, action: null, ...g }));
 // Shown only in a plain browser preview, where there's no tracker to ask.
 const SAMPLE_TIMELINE = {
   focused: 15480, away: 3300,
@@ -64,7 +63,6 @@ const dur = (secs) => {
   return m >= 60 ? `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, "0")}m` : `${m}m`;
 };
 
-const HISTORY = { read: [1, 1, 1, 1, 1, 1], genshin: [0, 1, 1, 1, 1, 1], side: [1, 0, 1, 1, 1, 0], blender: [0, 0, 1, 0, 0, 1] };
 // Used in a plain browser preview; the app reads deck.json.
 const SAMPLE_DECK = {
   start_my_day: { open: [], focus_minutes: 50 },
@@ -80,8 +78,8 @@ const store = {
 };
 
 const S = {
-  done: { read: true }, snoozed: {}, tab: "today", snoozeOpen: false, cmdOpen: false,
-  focusUntil: null, micMuted: false, editing: false,
+  goals: tauri ? null : SAMPLE_GOALS, tab: "today", snoozeOpen: false, cmdOpen: false,
+  focusUntil: null, micMuted: false,
   notes: store.get("notes", ["Ask Client X about the API keys"]),
   deck: store.get("deck", "launch"), pop: null, volume: 50,
   deckCfg: tauri ? null : SAMPLE_DECK,
@@ -90,15 +88,32 @@ const S = {
 };
 
 // ---------- derived ----------
+const GOAL_COLORS = { git: "#7048e8", "Window time": "#4263eb", Manual: "#2f9e44" };
+function left(secs) {
+  if (secs == null) return "today";
+  if (secs < 0) return "overdue";
+  const m = Math.round(secs / 60);
+  return m >= 60 ? `${Math.floor(m / 60)}h ${m % 60}m left` : `${m}m left`;
+}
 function goals() {
-  return GOALS.map((g) => {
-    const done = !!S.done[g.id];
-    return { ...g, done, missing: !done && g.pct === 0, streak: g.streak + (done ? 1 : 0) };
+  return (S.goals ?? []).filter((g) => g.scheduled).map((g) => {
+    const missing = !g.done && g.pct === 0 && !g.manual;
+    return {
+      ...g,
+      missing,
+      color: GOAL_COLORS[g.source] ?? "var(--accent)",
+      dueText: g.due ?? "Any time",
+      left: left(g.due_in),
+      kind: g.manual ? "manual" : missing ? "miss" : "prog",
+      tag: g.snoozed ? "Snoozed · " + g.snoozed : g.manual ? "Your call" : missing ? "Missing proof" : "In progress",
+      sub: g.skipped ? "Skipped today" : g.done ? (g.by_hand ? "Checked by you" : `Proof · ${g.source} · ${g.detail}`) : `${g.source} · ${g.detail}`,
+    };
   });
 }
 function queue(gs) {
-  const active = gs.filter((g) => !g.done);
-  return active.filter((g) => !S.snoozed[g.id]).concat(active.filter((g) => S.snoozed[g.id]));
+  const byDue = (a, b) => (a.due_in ?? 1e9) - (b.due_in ?? 1e9);
+  const active = gs.filter((g) => !g.done && !g.skipped);
+  return active.filter((g) => !g.snoozed).sort(byDue).concat(active.filter((g) => g.snoozed).sort(byDue));
 }
 const fmt = (d) => d.toTimeString().slice(0, 5);
 function timer() {
@@ -114,23 +129,32 @@ function timer() {
 function renderTop(gs, q) {
   const now = new Date();
   const doneCount = gs.filter((g) => g.done).length;
+  const next = q[0] ? `${q[0].name} · ${q[0].left.replace(" left", "")}` : gs.length ? "All clear" : "No goals yet";
   $("top").innerHTML = `
     <span class="clock">${fmt(now)}</span>
     <span class="day">${now.toLocaleDateString(undefined, { weekday: "short" })}</span>
     <span class="segs">${gs.map((g) => `<span class="${g.done ? "on" : ""}"></span>`).join("")}</span>
     <span class="count">${doneCount} of ${gs.length}</span>
     <span class="spacer"></span>
-    <span class="due">${svg("clock", 14, 2.2)}${esc(q[0] ? q[0].short : "All clear")}</span>
+    <span class="due">${svg("clock", 14, 2.2)}${esc(next)}</span>
     <button class="search round primary" data-act="cmd" aria-label="Search and run commands">${svg("search", 18, 2.2)}</button>`;
 }
 
-const COMMANDS = [
-  ["Open Side project workspace", "Workspace", "open:Side project"],
-  ["Start focus · 50 min", "Focus", "focus"],
-  ["Start timer · 25 min", "Timer", "timer:25"],
-  ["Mark “Read 30 min” done", "Goal", "toggle:read"],
-  ["Take screenshot", "Tool", "toast:Screenshot copied to clipboard"],
-];
+// Commands are built from whatever is live: goals, deck tiles, tools.
+function commands() {
+  const gs = goals();
+  return [
+    ...(S.deckCfg?.launch ?? []).map((x, i) => [`Open ${x.label}`, "Launch", `launch:${i}`]),
+    ...gs.filter((g) => !g.done).map((g) => [`Mark “${g.name}” done`, "Goal", `toggle:${g.id}`]),
+    [`Start focus · ${focusMinutes()} min`, "Focus", "focus"],
+    ...[5, 15, 25, 50].map((m) => [`Start timer · ${m} min`, "Timer", `timer:${m}`]),
+    ["Snip a screenshot", "Tool", "shell:screenshot"],
+    ["Clipboard history", "Tool", "shell:clipboard"],
+    ["Lock PC", "Tool", "shell:lock"],
+    ["Edit goals", "Settings", "editgoals"],
+    ["Edit deck", "Settings", "edit"],
+  ];
+}
 function renderCmd() {
   const el = $("cmd");
   el.hidden = !S.cmdOpen;
@@ -142,7 +166,7 @@ function renderCmd() {
   $("cmdq").focus();
 }
 function filterCmd(q) {
-  const hits = COMMANDS.filter(([label]) => label.toLowerCase().includes(q.toLowerCase()));
+  const hits = commands().filter(([label]) => label.toLowerCase().includes(q.toLowerCase()));
   $("cmdlist").innerHTML = hits
     .map(([label, hint, act], i) => `<button class="row${i === 0 ? " sel" : ""}" data-act="run" data-arg="${esc(act)}"><span>${esc(label)}</span><small>${hint}</small></button>`)
     .join("");
@@ -158,14 +182,15 @@ function renderLeft(gs) {
     .map(([id, l]) => `<button class="${S.tab === id ? "on" : ""}" data-act="tab" data-arg="${id}">${l}</button>`).join("");
   let body = "";
   if (S.tab === "today") {
-    body = `<div class="list">${gs.map((g) => `
+    const empty = !S.goals ? `<p class="foot">Loading…</p>` : !gs.length ? `<p class="foot">No goals for today.</p>` : "";
+    body = `<div class="list">${empty}${gs.map((g) => `
       <div class="goal row${g.done ? " done" : ""}">
         <button class="tick" data-act="toggle" data-arg="${g.id}" aria-label="${g.done ? "Undo" : "Mark done"}: ${esc(g.name)}">${tickIcon(g)}</button>
-        <div><span class="name">${esc(g.name)}</span><span class="sub">${esc(g.done ? (g.manual ? "Checked by you" : "Proof received · " + g.src) : g.src + " · " + g.detail)}</span></div>
-        <div class="meta"><span>${esc(g.due)}</span><span class="streak">${svg("flame", 12, 2.2)}${g.streak}</span></div>
+        <div><span class="name">${esc(g.name)}</span><span class="sub">${esc(g.sub)}</span></div>
+        <div class="meta"><span>${esc(g.dueText)}</span><span class="streak">${svg("flame", 12, 2.2)}${g.streak}</span></div>
       </div>`).join("")}
       <span class="spacer"></span>
-      <button class="ghost" data-act="toast" data-arg="Goal editor is coming next">+ New goal</button>
+      <button class="ghost" data-act="editgoals">+ New goal</button>
       <p class="foot">Tap a circle to mark done yourself</p></div>`;
   } else if (S.tab === "timeline") {
     const tl = S.timeline;
@@ -179,8 +204,8 @@ function renderLeft(gs) {
       <div class="total"><span>Focused today</span><b>${tl ? dur(tl.focused) : "–"}</b></div></div>`;
   } else {
     body = `<div class="list">${gs.map((g) => {
-      const days = HISTORY[g.id].map((b) => `<span class="${b ? "on" : ""}"></span>`).join("") + `<span class="${g.done ? "on" : "today"}"></span>`;
-      return `<div class="streakrow"><div><b>${esc(g.name)}</b><span>${g.streak} days</span></div><span class="dots">${days}</span></div>`;
+      const days = g.history.map((b) => `<span class="${b ? "on" : b === null ? "rest" : ""}"></span>`).join("") + `<span class="${g.done ? "on" : "today"}"></span>`;
+      return `<div class="streakrow"><div><b>${esc(g.name)}</b><span>${g.streak} ${g.streak === 1 ? "day" : "days"}</span></div><span class="dots">${days}</span></div>`;
     }).join("")}<p class="foot">Last 7 days · today on the right</p></div>`;
   }
   $("left").innerHTML = `<div class="tabs">${tabs}</div>${body}`;
@@ -190,11 +215,11 @@ function renderRight(q) {
   const c = q[0];
   let next;
   if (c) {
-    const kind = c.manual ? "manual" : c.pct === 0 ? "miss" : "prog";
+    const action = c.action?.label ?? (c.manual ? "Mark done" : null);
     next = `<div class="next">
-      <span class="tag ${kind}">${esc(S.snoozed[c.id] ? "Snoozed · " + S.snoozed[c.id] : c.tag)}</span>
-      <div><h2>${esc(c.title)}</h2><p>${esc(c.src)} · due ${esc(c.due)} · <b>${esc(c.left)}</b></p></div>
-      <button class="pill primary" data-act="primary">${esc(c.action)}</button>
+      <span class="tag ${c.kind}">${esc(c.tag)}</span>
+      <div><h2>${esc(c.name)}</h2><p>${esc(c.source)} · ${esc(c.detail)} · <b>${esc(c.due ? c.left + " · " + c.due : "today")}</b></p></div>
+      ${action ? `<button class="pill primary" data-act="primary">${esc(action)}</button>` : ""}
       <div class="pair">
         <button class="pill" data-act="done">Done</button>
         <button class="pill${S.snoozeOpen ? " on" : ""}" data-act="snoozemenu">Later ▾</button>
@@ -202,13 +227,13 @@ function renderRight(q) {
       ${S.snoozeOpen ? `<div class="grid2">${["15 min", "1 hour", "Tonight", "Skip today"].map((l) => `<button data-act="snooze" data-arg="${l}">${l}</button>`).join("")}</div>` : ""}
     </div>`;
   } else {
-    next = `<div class="clear"><h2>All clear</h2><p>Every goal has proof today.</p></div>`;
+    next = `<div class="clear"><h2>All clear</h2><p>${S.goals?.length ? "Every goal has proof today." : "Add a goal to get started."}</p></div>`;
   }
   const then = q.slice(1, 3);
   $("right").innerHTML = `
     <span class="label">Up next</span>
     ${next}
-    ${then.length ? `<div class="then"><small>Then</small>${then.map((g) => `<div><i style="background:${g.missing ? "var(--red)" : g.color}"></i><b>${esc(g.name)}</b><small>${esc(S.snoozed[g.id] ? "Snoozed · " + S.snoozed[g.id] : "Due " + g.due)}</small></div>`).join("")}</div>` : ""}
+    ${then.length ? `<div class="then"><small>Then</small>${then.map((g) => `<div><i style="background:${g.missing ? "var(--red)" : g.color}"></i><b>${esc(g.name)}</b><small>${esc(g.snoozed ? "Snoozed · " + g.snoozed : g.due ? "Due " + g.due : "Today")}</small></div>`).join("")}</div>` : ""}
     <div class="notes">
       <span class="label">Quick note</span>
       ${S.notes.map((n) => `<div class="note">${esc(n)}</div>`).join("")}
@@ -330,11 +355,24 @@ const ACTIONS = {
   cmd: () => (S.cmdOpen = !S.cmdOpen),
   run: (arg) => { S.cmdOpen = false; const [a, ...rest] = arg.split(":"); ACTIONS[a]?.(rest.join(":")); },
   tab: (id) => { S.tab = id; if (id === "timeline") loadTimeline(); },
-  toggle: (id) => (S.done[id] = !S.done[id]),
-  done: () => { const c = queue(goals())[0]; if (c) S.done[c.id] = true; S.snoozeOpen = false; },
-  primary: () => { const c = queue(goals())[0]; if (c) toast(c.action + "…"); },
+  toggle: (id) => {
+    const g = S.goals?.find((x) => x.id === id);
+    if (g) markGoal(id, g.done ? "undo" : "done");
+  },
+  done: () => { const c = queue(goals())[0]; if (c) markGoal(c.id, "done"); S.snoozeOpen = false; },
+  primary: () => {
+    const c = queue(goals())[0];
+    if (!c) return;
+    if (c.action?.open?.length) invoke("open_targets", { targets: c.action.open }).catch((e) => toast("Couldn't open " + e));
+    else if (c.manual) markGoal(c.id, "done");
+  },
+  editgoals: () => { invoke("edit_goals").catch(() => {}); toast("Opened goals.json · changes show next time"); },
   snoozemenu: () => (S.snoozeOpen = !S.snoozeOpen),
-  snooze: (label) => { const c = queue(goals())[0]; if (c) S.snoozed[c.id] = label; S.snoozeOpen = false; },
+  snooze: (label) => {
+    const c = queue(goals())[0];
+    S.snoozeOpen = false;
+    if (c) invoke("snooze_goal", { id: c.id, label }).then(loadGoals);
+  },
   note: addNote,
   deck: (id) => { S.deck = id; S.pop = null; store.set("deck", id); },
   edit: () => { invoke("edit_deck").catch(() => {}); toast("Opened deck.json · changes show next time"); },
@@ -419,6 +457,20 @@ async function syncAccent() {
   document.documentElement.style.setProperty("--accent-ink", light ? "#111" : "#fff");
 }
 
+async function loadGoals() {
+  if (!tauri) return;
+  const gs = await invoke("goals_today").catch((e) => { toast(String(e)); return null; });
+  if (gs) { S.goals = gs; render(); }
+}
+function markGoal(id, kind) {
+  if (!tauri) {
+    const g = S.goals.find((x) => x.id === id);
+    if (g) { g.done = kind === "done"; g.by_hand = g.done; g.pct = g.done ? 100 : 0; }
+    return;
+  }
+  invoke("mark_goal", { id, kind }).then(loadGoals);
+}
+
 async function loadSystem() {
   if (!tauri) return;
   const [cfg, audio] = await Promise.all([
@@ -443,6 +495,7 @@ tauri?.event?.listen("overlay:shown", () => {
   syncAccent();
   loadTimeline();
   loadSystem();
+  loadGoals();
   S.pop = null; S.cmdOpen = false; S.snoozeOpen = false;
   render();
   enter();
@@ -453,4 +506,5 @@ render();
 syncAccent();
 loadTimeline();
 loadSystem();
+loadGoals();
 enter();

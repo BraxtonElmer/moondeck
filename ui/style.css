@@ -111,6 +111,7 @@ input { font: inherit; color: inherit; }
   display: flex; justify-content: space-between; align-items: center;
   height: 42px; padding: 0 14px; font-size: 13.5px; text-align: left;
 }
+#cmdlist { max-height: 320px; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; }
 #cmd .row.sel { box-shadow: inset 3px 0 0 var(--accent); }
 #cmd .row small { color: var(--muted); font-size: 12px; }
 
@@ -155,6 +156,7 @@ input { font: inherit; color: inherit; }
 .dots { display: flex; gap: 5px; }
 .dots span { flex: 1; height: 8px; border-radius: 4px; background: var(--track); }
 .dots span.on { background: var(--green); }
+.dots span.rest { opacity: 0.35; }
 .dots span.today { background: var(--orange); opacity: 0.8; }
 
 /* ---------- up next ---------- */
