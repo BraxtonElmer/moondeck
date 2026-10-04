@@ -61,9 +61,7 @@ input { font: inherit; color: inherit; }
 [hidden] { display: none !important; }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
-#stage { position: fixed; inset: 0; background: var(--dim); animation: fade 0.16s ease-out; }
-@keyframes fade { from { opacity: 0; } }
-@keyframes rise { from { opacity: 0; transform: translate(var(--tx, 0), 8px); } }
+#stage { position: fixed; inset: 0; background: var(--dim); transition: background 0.24s ease; }
 
 .frost {
   background: var(--panel);
@@ -76,9 +74,9 @@ input { font: inherit; color: inherit; }
 
 /* ---------- top pill ---------- */
 #top {
-  position: absolute; top: 26px; left: 50%; --tx: -50%; transform: translateX(-50%);
+  position: absolute; top: 26px; left: 50%; transform: translateX(-50%);
   width: 580px; height: 68px; border-radius: 999px; padding: 0 10px 0 26px;
-  display: flex; align-items: center; gap: 14px; animation: rise 0.2s ease-out;
+  display: flex; align-items: center; gap: 14px;
 }
 .clock { font-size: 28px; font-weight: 700; letter-spacing: -0.03em; font-variant-numeric: tabular-nums; }
 .day { font-size: 13px; color: var(--muted); margin-left: -4px; }
@@ -197,9 +195,9 @@ input { font: inherit; color: inherit; }
 
 /* ---------- deck ---------- */
 #deck {
-  position: absolute; bottom: 20px; left: 50%; --tx: -50%; transform: translateX(-50%);
+  position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%);
   width: 780px; height: 104px; border-radius: 32px; padding: 0 14px 0 12px;
-  display: flex; align-items: center; gap: 10px; animation: rise 0.2s ease-out;
+  display: flex; align-items: center; gap: 10px;
 }
 .pages { display: flex; flex-direction: column; gap: 3px; padding: 4px; border-radius: 18px; background: var(--chip); }
 .pages button { width: 84px; height: 26px; border-radius: 12px; font-size: 11.5px; font-weight: 500; color: var(--muted); }
@@ -253,3 +251,27 @@ input { font: inherit; color: inherit; }
 
 #hint { position: absolute; left: 36px; bottom: 30px; margin: 0; padding: 8px 14px; border-radius: 999px; background: var(--panel); font-size: 12px; color: var(--muted); }
 kbd { font: inherit; font-weight: 700; color: var(--ink); }
+
+/* ---------- open / close: every panel slides to its own edge ---------- */
+#top, #settings, #left, #right, #deck, #hint, #cmd, #pop, #toast {
+  transition: transform 0.34s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.22s ease-out;
+}
+#left, #right { transition-delay: 0.03s; }
+
+body.out #stage { background: transparent; }
+body.out #top { transform: translate(-50%, -170%); opacity: 0; }
+body.out #settings { transform: translateY(-200%); opacity: 0; }
+body.out #left { transform: translate(-130%, -50%); opacity: 0; }
+body.out #right { transform: translate(130%, -50%); opacity: 0; }
+body.out #deck { transform: translate(-50%, 170%); opacity: 0; }
+body.out #hint { transform: translateY(260%); opacity: 0; }
+body.out #cmd, body.out #pop, body.out #toast { opacity: 0; }
+body.out #stage, body.out #stage * {
+  transition-duration: 0.2s;
+  transition-delay: 0s;
+  transition-timing-function: cubic-bezier(0.5, 0, 0.75, 0);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #stage, #stage * { transition-duration: 0.01s !important; }
+}

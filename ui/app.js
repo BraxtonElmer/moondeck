@@ -292,7 +292,23 @@ function addNote() {
   S.notes = [text, ...S.notes].slice(0, 3);
   store.set("notes", S.notes);
 }
-const hide = () => invoke("hide_overlay");
+// ---------- open / close ----------
+const EXIT_MS = 200;
+let closing = false;
+function enter() {
+  closing = false;
+  const body = document.body;
+  if (!body.classList.contains("out")) return;
+  // Force a style flush so the "out" state is committed before transitioning in.
+  void body.offsetWidth;
+  body.classList.remove("out");
+}
+function hide() {
+  if (closing) return;
+  closing = true;
+  document.body.classList.add("out");
+  setTimeout(() => invoke("hide_overlay"), EXIT_MS);
+}
 
 const ACTIONS = {
   cmd: () => (S.cmdOpen = !S.cmdOpen),
@@ -379,7 +395,10 @@ tauri?.event?.listen("overlay:shown", () => {
   syncAccent();
   S.pop = null; S.cmdOpen = false; S.snoozeOpen = false;
   render();
+  enter();
 });
+tauri?.event?.listen("overlay:hide", hide);
 
 render();
 syncAccent();
+enter();

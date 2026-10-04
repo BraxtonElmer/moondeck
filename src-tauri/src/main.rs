@@ -1,5 +1,10 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+use std::{
+    sync::atomic::{AtomicU64, Ordering},
+    time::Duration,
+};
+
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
@@ -8,6 +13,9 @@ use tauri::{
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 
 const OVERLAY: &str = "overlay";
+
+/// Bumped on every show, so a stale hide fallback can't close a freshly opened overlay.
+static SHOWN: AtomicU64 = AtomicU64::new(0);
 
 /// Stretch the overlay over the monitor the cursor is on, then show it.
 fn show(app: &AppHandle) {
@@ -23,6 +31,7 @@ fn show(app: &AppHandle) {
         let _ = win.set_size(*m.size());
     }
 
+    SHOWN.fetch_add(1, Ordering::SeqCst);
     let _ = win.show();
     let _ = win.set_focus();
     let _ = win.emit("overlay:shown", ());
@@ -34,12 +43,47 @@ fn hide(app: &AppHandle) {
     }
 }
 
+/// Let the UI play its exit animation; it calls `hide_overlay` when done.
+/// Hides anyway if the UI doesn't answer in time.
+fn request_hide(app: &AppHandle) {
+    let Some(win) = app.get_webview_window(OVERLAY) else { return };
+    if !win.is_visible().unwrap_or(false) {
+        return;
+    }
+    let _ = win.emit("overlay:hide", ());
+    let gen = SHOWN.load(Ordering::SeqCst);
+    let app = app.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(500));
+        if SHOWN.load(Ordering::SeqCst) == gen {
+            hide(&app);
+        }
+    });
+}
+
+/// The overlay animates itself; stop DWM's default show/hide transition on top of it.
+#[cfg(windows)]
+fn disable_dwm_transitions(win: &tauri::WebviewWindow) {
+    use windows::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWA_TRANSITIONS_FORCEDISABLED};
+    if let Ok(hwnd) = win.hwnd() {
+        let on: i32 = 1;
+        unsafe {
+            let _ = DwmSetWindowAttribute(
+                hwnd,
+                DWMWA_TRANSITIONS_FORCEDISABLED,
+                &on as *const i32 as _,
+                std::mem::size_of::<i32>() as u32,
+            );
+        }
+    }
+}
+
 fn toggle(app: &AppHandle) {
     let visible = app
         .get_webview_window(OVERLAY)
         .and_then(|w| w.is_visible().ok())
         .unwrap_or(false);
-    if visible { hide(app) } else { show(app) }
+    if visible { request_hide(app) } else { show(app) }
 }
 
 #[tauri::command]
@@ -107,17 +151,20 @@ fn main() {
             app.global_shortcut()
                 .register(Shortcut::new(Some(Modifiers::ALT), Code::Space))?;
 
+            #[cfg(windows)]
+            if let Some(win) = app.get_webview_window(OVERLAY) {
+                disable_dwm_transitions(&win);
+            }
+
             show(app.handle());
             Ok(())
         })
         .on_window_event(|win, event| match event {
             // Overlay behaves like a popup: losing focus sends it back to the tray.
-            WindowEvent::Focused(false) => {
-                let _ = win.hide();
-            }
+            WindowEvent::Focused(false) => request_hide(win.app_handle()),
             WindowEvent::CloseRequested { api, .. } => {
                 api.prevent_close();
-                let _ = win.hide();
+                request_hide(win.app_handle());
             }
             _ => {}
         })
