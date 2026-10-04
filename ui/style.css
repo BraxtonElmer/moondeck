@@ -209,10 +209,10 @@ input { font: inherit; color: inherit; }
   width: 780px; height: 104px; border-radius: 32px; padding: 0 14px 0 12px;
   display: flex; align-items: center; gap: 10px;
 }
-.pages { display: flex; flex-direction: column; gap: 3px; padding: 4px; border-radius: 18px; background: var(--chip); }
+.pages { display: flex; flex-direction: column; gap: 3px; padding: 4px; border-radius: 18px; background: var(--chip); max-height: 92px; overflow-y: auto; scrollbar-width: none; }
 .pages button { width: 84px; height: 26px; border-radius: 12px; font-size: 11.5px; font-weight: 500; color: var(--muted); }
 .pages button.on { background: var(--seg-on); color: var(--ink); font-weight: 700; box-shadow: var(--seg-shadow); }
-.tiles { flex: 1; display: flex; justify-content: center; gap: 4px; }
+.tiles { flex: 1; display: flex; justify-content: center; gap: 4px; min-width: 0; overflow-x: auto; scrollbar-width: none; }
 .tile {
   position: relative; width: 80px; padding: 6px 0; border-radius: 18px; border: 1.5px solid transparent;
   display: flex; flex-direction: column; align-items: center; gap: 6px; font-size: 11.5px; font-weight: 600;
@@ -228,6 +228,14 @@ input { font: inherit; color: inherit; }
 .tile.active .ico { box-shadow: inset 0 0 0 1.5px var(--accent); }
 .tile.add { color: var(--muted); }
 .tile.add .ico { background: transparent; border: 1.5px dashed var(--track); }
+.tile .num { position: absolute; top: 2px; left: 10px; font-size: 9.5px; font-weight: 700; color: var(--muted); opacity: 0; transition: opacity 0.15s; }
+#deck:hover .tile .num, #deck:focus-within .tile .num { opacity: 0.7; }
+.ico img { width: 30px; height: 30px; image-rendering: auto; }
+.ico .letter { font-size: 20px; font-weight: 700; }
+.ico.sm { width: 26px; height: 26px; border-radius: 8px; flex-shrink: 0; }
+.ico.sm img { width: 18px; height: 18px; }
+.editing .tile[data-i] { border: 1.5px dashed var(--accent); cursor: grab; }
+.editing .tile[data-i]:active { cursor: grabbing; }
 .tile .dot { position: absolute; top: 6px; right: 14px; width: 10px; height: 10px; border-radius: 50%; background: var(--green); border: 2px solid var(--panel-solid); }
 .editbtn { width: 44px; height: 44px; flex-shrink: 0; background: var(--chip); }
 .editbtn.on { background: var(--accent); color: var(--accent-ink); }
@@ -239,6 +247,18 @@ input { font: inherit; color: inherit; }
   display: flex; flex-direction: column; gap: 12px;
 }
 #pop header { display: flex; justify-content: space-between; align-items: baseline; font-weight: 700; font-size: 14px; }
+#pop.wide { width: 400px; }
+#pop header small { font-weight: 500; font-size: 12px; color: var(--muted); }
+#pop .tabs.small button { height: 30px; font-size: 11.5px; padding: 0 4px; }
+#pop textarea { font: inherit; font-size: 13px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--chip); color: var(--ink); resize: vertical; outline: none; }
+#pop textarea:focus { border-color: var(--accent); }
+.picklist { display: flex; flex-direction: column; gap: 2px; max-height: 260px; overflow-y: auto; }
+.picklist.grid { display: grid; grid-template-columns: 1fr 1fr; }
+.picklist .row { display: flex; align-items: center; gap: 10px; height: 40px; padding: 0 8px; font-size: 13px; text-align: left; }
+.pill.danger { color: var(--red); }
+.pill:disabled { opacity: 0.4; cursor: default; }
+.pill { display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+.pages button[data-act="addpage"] { color: var(--accent); font-weight: 600; }
 #pop header span { font-size: 22px; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
 #pop input[type="range"] { width: 100%; accent-color: var(--accent); }
 #pop .out { display: flex; justify-content: space-between; align-items: center; height: 40px; padding: 0 12px; font-size: 13px; }

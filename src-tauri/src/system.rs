@@ -157,7 +157,7 @@ pub fn open(target: &str) -> Res<()> {
 }
 
 /// Plain names are looked up as Start menu shortcuts; anything path- or URL-like is left alone.
-fn resolve(target: &str) -> Option<PathBuf> {
+pub fn resolve(target: &str) -> Option<PathBuf> {
     if target.contains(['\\', '/', ':']) || target.contains('.') {
         return None;
     }

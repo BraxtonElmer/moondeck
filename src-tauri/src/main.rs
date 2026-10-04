@@ -1,6 +1,8 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod ai;
+#[cfg(windows)]
+mod apps;
 mod deck;
 mod detect;
 mod goals;
@@ -141,6 +143,25 @@ fn data_dir(app: &AppHandle) -> Result<std::path::PathBuf, String> {
 #[tauri::command]
 fn deck_config(app: AppHandle) -> Result<serde_json::Value, String> {
     deck::load(&data_dir(&app)?)
+}
+
+#[tauri::command]
+fn save_deck(app: AppHandle, deck: serde_json::Value) -> Result<(), String> {
+    deck::save(&data_dir(&app)?, &deck)
+}
+
+#[tauri::command]
+fn list_apps() -> Vec<String> {
+    apps::list()
+}
+
+/// Real icon for a deck target: a Start menu app name, file, folder or exe. None for URLs.
+#[tauri::command]
+async fn app_icon(target: String) -> Option<String> {
+    let path = system::resolve(&target)
+        .map(|p| p.to_string_lossy().into_owned())
+        .or_else(|| std::path::Path::new(&target).exists().then(|| target.clone()))?;
+    apps::icon_data_url(&path)
 }
 
 #[tauri::command]
@@ -342,6 +363,9 @@ fn main() {
             timeline,
             deck_config,
             edit_deck,
+            save_deck,
+            list_apps,
+            app_icon,
             goals_today,
             mark_goal,
             snooze_goal,

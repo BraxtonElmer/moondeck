@@ -21,12 +21,14 @@ tauri-plugin-autostart = "2.7.0"
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 webpki-roots = "1"
 base64 = "0.22"
+png = "0.18"
 
 [target.'cfg(windows)'.dependencies]
 windows-registry = "0.6"
 windows = { version = "0.62", features = [
     "Win32_Foundation",
     "Win32_Graphics_Dwm",
+    "Win32_Graphics_Gdi",
     "Win32_Media_Audio",
     "Win32_Media_Audio_Endpoints",
     "Win32_Security_Credentials",

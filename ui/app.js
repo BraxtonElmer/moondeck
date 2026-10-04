@@ -34,6 +34,11 @@ const ICON = {
   next: '<path d="M5 5v14l10-7z" fill="currentColor"/><path d="M19 5v14" stroke-width="2.4"/>',
   playpause: '<path d="M4 5v14l9-7z" fill="currentColor"/><path d="M16 5v14M20 5v14" stroke-width="2.2"/>',
   smile: '<circle cx="12" cy="12" r="9"/><path d="M8.5 14.5a4.5 4.5 0 0 0 7 0M9 9.5h.01M15 9.5h.01" stroke-width="2.2"/>',
+  globe: '<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/>',
+  grip: '<path d="M9 6h.01M15 6h.01M9 12h.01M15 12h.01M9 18h.01M15 18h.01" stroke-width="3"/>',
+  left: '<path d="M15 6l-6 6 6 6"/>',
+  right: '<path d="M9 6l6 6-6 6"/>',
+  trash: '<path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/>',
   lock: '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>',
 };
 const svg = (name, size = 22, sw = 1.8) =>
@@ -69,12 +74,25 @@ const dur = (secs) => {
 
 // Used in a plain browser preview; the app reads deck.json.
 const SAMPLE_DECK = {
-  start_my_day: { open: [], focus_minutes: 50 },
-  launch: [
-    { label: "VS Code", icon: "code", open: [] }, { label: "Discord", icon: "chat", open: [] },
-    { label: "Spotify", icon: "music", open: [] }, { label: "Genshin", icon: "pad", open: [] },
+  pages: [
+    { name: "Launch", tiles: [
+      { label: "Start my day", icon: "sun", run: { type: "routine", targets: [], focus: 50 } },
+      { label: "VS Code", icon: "code", run: { type: "open", targets: ["Visual Studio Code"] } },
+      { label: "Discord", icon: "chat", run: { type: "open", targets: ["Discord"] } },
+      { label: "Spotify", icon: "music", run: { type: "open", targets: ["Spotify"] } },
+      { label: "Docs", icon: "globe", run: { type: "open", targets: ["https://docs.rs"] } },
+    ] },
+    { name: "Controls", tiles: ["focus:target:Focus", "timer:timer:Timer", "mic:mic:Mic", "playpause:playpause:Play/Pause", "next:next:Next", "volume:vol:Volume"]
+      .map((x) => { const [action, icon, label] = x.split(":"); return { label, icon, run: { type: "builtin", action } }; }) },
+    { name: "Tools", tiles: ["snip:shot:Snip", "clipboard:clip:Clipboard", "emoji:smile:Emoji", "lock:lock:Lock PC"]
+      .map((x) => { const [action, icon, label] = x.split(":"); return { label, icon, run: { type: "builtin", action } }; }) },
   ],
 };
+const BUILTINS = [
+  ["focus", "target", "Focus"], ["timer", "timer", "Timer"], ["mic", "mic", "Mic"], ["playpause", "playpause", "Play/Pause"],
+  ["next", "next", "Next"], ["volume", "vol", "Volume"], ["snip", "shot", "Snip"], ["clipboard", "clip", "Clipboard"],
+  ["emoji", "smile", "Emoji"], ["lock", "lock", "Lock PC"],
+];
 
 const store = {
   get(k, d) { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } },
@@ -85,7 +103,8 @@ const S = {
   goals: tauri ? null : SAMPLE_GOALS, tasks: tauri ? null : SAMPLE_TASKS, tab: "today", snoozeOpen: false, cmdOpen: false,
   focusUntil: null, micMuted: false,
   notes: store.get("notes", ["Ask Client X about the API keys"]),
-  deck: store.get("deck", "launch"), pop: null, volume: 50,
+  page: Number(store.get("page", 0)) || 0, pop: null, volume: 50,
+  editDeck: false, editTile: null, addKind: "apps", apps: null, appQuery: "", icons: {},
   deckCfg: tauri ? null : SAMPLE_DECK,
   timerEnd: null, toast: "",
   timeline: tauri ? null : SAMPLE_TIMELINE,
@@ -177,7 +196,9 @@ function renderTop(gs, q) {
 function commands() {
   const gs = goals();
   return [
-    ...(S.deckCfg?.launch ?? []).map((x, i) => [`Open ${x.label}`, "Launch", `launch:${i}`]),
+    ...(S.deckCfg?.pages ?? []).flatMap((p, pi) => p.tiles
+      .filter((t) => t.run?.type !== "builtin")
+      .map((t) => [t.run?.type === "routine" ? t.label : `Open ${t.label}`, p.name, `tile:${pi}:${p.tiles.indexOf(t)}`])),
     ...gs.filter((g) => !g.done).map((g) => [`Mark “${g.name}” done`, "Goal", `toggle:${g.id}`]),
     [`Start focus · ${focusMinutes()} min`, "Focus", "focus"],
     ...[5, 15, 25, 50].map((m) => [`Start timer · ${m} min`, "Timer", `timer:${m}`]),
@@ -287,50 +308,186 @@ function renderRight(q) {
     </div>`;
 }
 
-function tiles(t) {
-  const focusOn = S.focusUntil && S.focusUntil > Date.now();
-  const cfg = S.deckCfg;
-  const pages = {
-    launch: [
-      { label: "Start my day", icon: "sun", cls: "soft", act: "startday" },
-      ...(cfg?.launch ?? []).slice(0, 5).map((x, i) => ({ label: x.label, icon: ICON[x.icon] ? x.icon : "folder", act: "launch", arg: String(i) })),
-      { label: "Add tile", icon: "plus", cls: "add", act: "edit" },
-    ],
-    controls: [
-      { label: focusOn ? "Until " + fmt(new Date(S.focusUntil)) : `Focus ${focusMinutes()}m`, icon: "target", cls: focusOn ? "accent" : "soft", act: "focus" },
-      { label: t.running ? t.text : "Timer", icon: "timer", cls: S.pop === "timer" ? "active" : t.running ? "soft" : "", act: "pop", arg: "timer" },
-      { label: S.micMuted ? "Muted" : "Mic on", icon: S.micMuted ? "micoff" : "mic", cls: S.micMuted ? "warn" : "", act: "mic" },
-      { label: "Play/Pause", icon: "playpause", act: "media", arg: "playpause" },
-      { label: "Next", icon: "next", act: "media", arg: "next" },
-      { label: `Vol ${S.volume}%`, icon: "vol", cls: S.pop === "volume" ? "active" : "", act: "pop", arg: "volume" },
-    ],
-    tools: [
-      { label: "Snip", icon: "shot", act: "shell", arg: "screenshot" },
-      { label: "Clipboard", icon: "clip", act: "shell", arg: "clipboard" },
-      { label: "Emoji", icon: "smile", act: "shell", arg: "emoji" },
-      { label: "Lock PC", icon: "lock", act: "shell", arg: "lock" },
-      { label: "Edit deck", icon: "pencil", cls: "add", act: "edit" },
-    ],
-  };
-  return pages[S.deck];
+// ---------- deck ----------
+const page = () => S.deckCfg?.pages?.[S.page] ?? S.deckCfg?.pages?.[0];
+const focusMinutes = () => {
+  for (const p of S.deckCfg?.pages ?? []) for (const t of p.tiles) if (t.run?.type === "routine" && t.run.focus) return t.run.focus;
+  return 50;
+};
+const isUrl = (x) => /^[a-z]+:\/\//i.test(x ?? "");
+
+function loadIcon(target) {
+  if (!tauri || !target || isUrl(target) || target in S.icons) return;
+  S.icons[target] = null;
+  invoke("app_icon", { target }).then((url) => { if (url) { S.icons[target] = url; renderDeck(timer()); renderPop(timer()); } });
 }
-const focusMinutes = () => S.deckCfg?.start_my_day?.focus_minutes ?? 50;
+
+function iconHtml(tile) {
+  const first = tile.run?.targets?.[0];
+  if (tile.icon === "app" || !ICON[tile.icon]) {
+    if (isUrl(first)) return svg("globe");
+    loadIcon(first);
+    const img = S.icons[first];
+    if (img) return `<img src="${img}" alt="">`;
+    if (!ICON[tile.icon]) return `<b class="letter">${esc((tile.label || "?").slice(0, 1).toUpperCase())}</b>`;
+  }
+  return svg(tile.icon);
+}
+
+/// Live look of a tile: builtins reflect state (mic muted, timer running...).
+function tileView(tile, t) {
+  const v = { label: tile.label, cls: "", icon: iconHtml(tile) };
+  const a = tile.run?.type === "builtin" ? tile.run.action : null;
+  const focusOn = S.focusUntil && S.focusUntil > Date.now();
+  if (a === "focus") { v.label = focusOn ? "Until " + fmt(new Date(S.focusUntil)) : `Focus ${focusMinutes()}m`; v.cls = focusOn ? "accent" : "soft"; }
+  if (a === "timer") { v.label = t.running ? t.text : tile.label; v.cls = S.pop === "timer" ? "active" : t.running ? "soft" : ""; }
+  if (a === "mic") { v.label = S.micMuted ? "Muted" : "Mic on"; v.icon = svg(S.micMuted ? "micoff" : "mic"); v.cls = S.micMuted ? "warn" : ""; }
+  if (a === "volume") { v.label = `Vol ${S.volume}%`; v.cls = S.pop === "volume" ? "active" : ""; }
+  if (tile.run?.type === "routine") v.cls = "soft";
+  if (S.editDeck && S.pop === "tile" && S.editTile === tile) v.cls += " active";
+  return v;
+}
+
 function renderDeck(t) {
-  const pages = [["launch", "Launch"], ["controls", "Controls"], ["tools", "Tools"]]
-    .map(([id, l]) => `<button class="${S.deck === id ? "on" : ""}" data-act="deck" data-arg="${id}">${l}</button>`).join("");
   const el = $("deck");
+  const cfg = S.deckCfg;
+  if (!cfg) { el.innerHTML = `<p class="foot" style="flex:1">Loading deck…</p>`; return; }
+  if (S.page >= cfg.pages.length) S.page = 0;
+  el.classList.toggle("editing", S.editDeck);
+  const pages = cfg.pages.map((p, i) => `<button class="${S.page === i ? "on" : ""}" data-act="page" data-arg="${i}">${esc(p.name)}</button>`).join("")
+    + (S.editDeck ? `<button data-act="addpage" aria-label="Add page">+ Page</button>` : "");
+  const ts = page()?.tiles ?? [];
   el.innerHTML = `
     <div class="pages">${pages}</div>
-    <div class="tiles">${tiles(t).map((x) => `
-      <button class="tile ${x.cls || ""}" data-act="${x.act}" data-arg="${esc(x.arg || "")}" aria-label="${esc(x.label)}">
-        <span class="ico">${svg(x.icon)}</span>${x.dot ? '<span class="dot"></span>' : ""}${esc(x.label)}
-      </button>`).join("")}</div>
-    <button class="editbtn round" data-act="edit" aria-label="Edit deck.json">${svg("pencil", 18, 2)}</button>`;
+    <div class="tiles" id="tiles">${ts.map((tile, i) => {
+      const v = tileView(tile, t);
+      return `<button class="tile ${v.cls}" data-act="tile" data-arg="${S.page}:${i}" data-i="${i}" ${S.editDeck ? 'draggable="true"' : ""} aria-label="${esc(v.label)}">
+        ${i < 9 && !S.editDeck ? `<kbd class="num">${i + 1}</kbd>` : ""}<span class="ico">${v.icon}</span>${esc(v.label)}
+      </button>`;
+    }).join("")}${S.editDeck ? `<button class="tile add${S.pop === "add" ? " active" : ""}" data-act="addtile" aria-label="Add a tile"><span class="ico">${svg("plus")}</span>Add</button>` : ""}</div>
+    <button class="editbtn round${S.editDeck ? " on" : ""}" data-act="editdeck" aria-label="${S.editDeck ? "Done editing" : "Edit deck"}">${svg(S.editDeck ? "check" : "pencil", 18, 2)}</button>`;
+}
+
+function saveDeck() {
+  if (tauri) invoke("save_deck", { deck: S.deckCfg }).catch((e) => toast("Couldn't save deck: " + e));
+}
+function addTile(tile) {
+  page().tiles.push(tile);
+  saveDeck();
+  toast(`Added ${tile.label}`);
+}
+
+/// Run a tile: open things, run a routine, or a built-in control.
+function runTile(tile) {
+  const run = tile.run ?? {};
+  if (run.type === "open") {
+    invoke("open_targets", { targets: run.targets ?? [] }).then(() => toast("Opening " + tile.label), (e) => toast("Couldn't open " + e));
+  } else if (run.type === "routine") {
+    if (run.targets?.length) invoke("open_targets", { targets: run.targets }).catch((e) => toast("Couldn't open " + e));
+    if (run.focus) S.focusUntil = Date.now() + run.focus * 60000;
+    toast(`${tile.label} · ${run.targets?.length ?? 0} opened${run.focus ? ` · focus ${run.focus}m` : ""}`);
+  } else if (run.type === "builtin") {
+    const a = run.action;
+    if (a === "timer" || a === "volume") ACTIONS.pop(a);
+    else if (a === "playpause" || a === "next" || a === "prev") ACTIONS.media(a);
+    else if (a === "snip") ACTIONS.shell("screenshot");
+    else if (a === "clipboard" || a === "emoji" || a === "lock") ACTIONS.shell(a);
+    else ACTIONS[a]?.();
+  }
+}
+
+// Drag to reorder while editing.
+let dragFrom = null;
+document.addEventListener("dragstart", (e) => {
+  const tile = e.target.closest?.(".tile[data-i]");
+  if (!tile || !S.editDeck) return;
+  dragFrom = Number(tile.dataset.i);
+  e.dataTransfer.effectAllowed = "move";
+});
+document.addEventListener("dragover", (e) => {
+  if (dragFrom != null && e.target.closest?.("#tiles")) e.preventDefault();
+});
+document.addEventListener("drop", (e) => {
+  const over = e.target.closest?.(".tile[data-i]");
+  if (dragFrom == null || !over) return;
+  e.preventDefault();
+  const tiles = page().tiles;
+  const [moved] = tiles.splice(dragFrom, 1);
+  tiles.splice(Number(over.dataset.i), 0, moved);
+  dragFrom = null;
+  saveDeck();
+  renderDeck(timer());
+});
+document.addEventListener("dragend", () => (dragFrom = null));
+
+function renderAddPop(el) {
+  const kinds = [["apps", "App"], ["web", "Website"], ["path", "File / folder"], ["routine", "Routine"], ["builtin", "Control"]];
+  let body = "";
+  if (S.addKind === "apps") {
+    if (!S.apps) { if (tauri) invoke("list_apps").then((a) => { S.apps = a; renderPop(timer()); }); else S.apps = ["Visual Studio Code", "Discord", "Spotify", "Firefox", "Notepad", "Steam", "OBS Studio"]; }
+    const q = S.appQuery.toLowerCase();
+    const hits = (S.apps ?? []).filter((a) => a.toLowerCase().includes(q)).slice(0, 7);
+    hits.forEach(loadIcon);
+    body = `<label class="field"><input id="appq" value="${esc(S.appQuery)}" placeholder="Search installed apps" autocomplete="off"></label>
+      <div class="picklist">${!S.apps ? `<p class="foot">Loading apps…</p>` : hits.map((a) => `<button class="row" data-act="addapp" data-arg="${esc(a)}"><span class="ico sm">${S.icons[a] ? `<img src="${S.icons[a]}" alt="">` : svg("folder", 16)}</span>${esc(a)}</button>`).join("") || `<p class="foot">No match</p>`}</div>`;
+  } else if (S.addKind === "web") {
+    body = `<label class="field">Label<input id="add-label" placeholder="GitHub"></label>
+      <label class="field">URL<input id="add-target" placeholder="https://github.com"></label>
+      <button class="pill primary" data-act="addcustom" data-arg="web">Add website</button>`;
+  } else if (S.addKind === "path") {
+    body = `<label class="field">Label<input id="add-label" placeholder="Client X"></label>
+      <label class="field">Path<input id="add-target" placeholder="C:\\Users\\you\\Projects\\client-x"></label>
+      <button class="pill primary" data-act="addcustom" data-arg="path">Add</button>`;
+  } else if (S.addKind === "routine") {
+    body = `<label class="field">Label<input id="add-label" placeholder="Start my day"></label>
+      <label class="field">Open, one per line (apps, folders, URLs)<textarea id="add-target" rows="3" placeholder="Visual Studio Code&#10;Spotify&#10;https://mail.google.com"></textarea></label>
+      <label class="field">Focus minutes (0 for none)<input id="add-focus" type="number" min="0" value="50"></label>
+      <button class="pill primary" data-act="addcustom" data-arg="routine">Add routine</button>`;
+  } else {
+    body = `<div class="picklist grid">${BUILTINS.map(([a, icon, label]) => `<button class="row" data-act="addbuiltin" data-arg="${a}"><span class="ico sm">${svg(icon, 16)}</span>${label}</button>`).join("")}</div>`;
+  }
+  el.innerHTML = `<header>Add a tile <small>to ${esc(page()?.name ?? "")}</small></header>
+    <div class="tabs small">${kinds.map(([k, l]) => `<button class="${S.addKind === k ? "on" : ""}" data-act="addkind" data-arg="${k}">${l}</button>`).join("")}</div>${body}`;
+  $("appq")?.focus();
+}
+
+function renderTilePop(el) {
+  const tile = S.editTile;
+  const i = page().tiles.indexOf(tile);
+  const targets = tile.run?.targets;
+  el.innerHTML = `<header>Edit tile</header>
+    <label class="field">Label<input id="edit-label" value="${esc(tile.label)}"></label>
+    ${targets ? `<label class="field">Opens, one per line<textarea id="edit-targets" rows="3">${esc(targets.join("\n"))}</textarea></label>` : ""}
+    ${tile.run?.type === "routine" ? `<label class="field">Focus minutes<input id="edit-focus" type="number" min="0" value="${tile.run.focus ?? 0}"></label>` : ""}
+    <div class="pair">
+      <button class="pill" data-act="movetile" data-arg="-1" ${i === 0 ? "disabled" : ""} aria-label="Move left">${svg("left", 16, 2.2)}</button>
+      <button class="pill" data-act="movetile" data-arg="1" ${i === page().tiles.length - 1 ? "disabled" : ""} aria-label="Move right">${svg("right", 16, 2.2)}</button>
+      <button class="pill danger" data-act="removetile">${svg("trash", 16, 2)} Remove</button>
+    </div>
+    <button class="pill primary" data-act="savetile">Save</button>`;
+}
+
+function renderPagePop(el) {
+  const p = page();
+  el.innerHTML = `<header>Edit page</header>
+    <label class="field">Name<input id="page-name" value="${esc(p.name)}"></label>
+    <div class="pair">
+      <button class="pill" data-act="movepage" data-arg="-1" ${S.page === 0 ? "disabled" : ""}>Move up</button>
+      <button class="pill" data-act="movepage" data-arg="1" ${S.page === S.deckCfg.pages.length - 1 ? "disabled" : ""}>Move down</button>
+    </div>
+    <div class="pair">
+      <button class="pill danger" data-act="removepage" ${S.deckCfg.pages.length < 2 ? "disabled" : ""}>${svg("trash", 16, 2)} Delete page</button>
+      <button class="pill primary" data-act="savepage">Save</button>
+    </div>`;
 }
 
 function renderPop(t) {
   const el = $("pop");
   el.hidden = !S.pop;
+  el.classList.toggle("wide", S.pop === "add");
+  if (S.pop === "add") return renderAddPop(el);
+  if (S.pop === "tile" && S.editTile) return renderTilePop(el);
+  if (S.pop === "page") return renderPagePop(el);
   if (S.pop === "volume") {
     el.innerHTML = `<header>Volume <span id="volval">${S.volume}%</span></header>
       <input id="vol" type="range" min="0" max="100" value="${S.volume}" aria-label="Volume">
@@ -459,7 +616,9 @@ function render() {
   renderToast();
   renderSheet();
   $("settings").innerHTML = svg("sliders", 18, 2);
-  $("hint").innerHTML = "<kbd>Alt + Space</kbd> opens · <kbd>Esc</kbd> back to tray";
+  $("hint").innerHTML = S.editDeck
+    ? "Drag to reorder · click a tile to edit"
+    : "<kbd>1–9</kbd> tiles · <kbd>[ ]</kbd> pages · <kbd>/</kbd> search · <kbd>Esc</kbd> to tray";
 }
 
 // ---------- actions ----------
@@ -558,20 +717,73 @@ const ACTIONS = {
     if (c) invoke("snooze_goal", { id: c.id, label }).then(loadGoals);
   },
   note: addNote,
-  deck: (id) => { S.deck = id; S.pop = null; store.set("deck", id); },
-  edit: () => { invoke("edit_deck").catch(() => {}); toast("Opened deck.json · changes show next time"); },
+  page: (i) => {
+    i = Number(i);
+    if (S.editDeck && S.page === i) { S.pop = S.pop === "page" ? null : "page"; return; }
+    S.page = i; S.pop = null; store.set("page", i);
+  },
+  tile: (arg) => {
+    const [p, i] = arg.split(":").map(Number);
+    const tile = S.deckCfg?.pages?.[p]?.tiles?.[i];
+    if (!tile) return;
+    if (S.editDeck) { S.editTile = tile; S.pop = "tile"; return; }
+    runTile(tile);
+  },
+  editdeck: () => { S.editDeck = !S.editDeck; S.pop = null; S.editTile = null; },
+  edit: () => { S.editDeck = true; S.pop = "add"; },
+  addtile: () => { S.pop = S.pop === "add" ? null : "add"; S.appQuery = ""; },
+  addkind: (k) => (S.addKind = k),
+  addapp: (name) => addTile({ label: name.replace(/^Visual Studio Code$/, "VS Code"), icon: "app", run: { type: "open", targets: [name] } }),
+  addbuiltin: (a) => { const [, icon, label] = BUILTINS.find((b) => b[0] === a); addTile({ label, icon, run: { type: "builtin", action: a } }); },
+  addcustom: (kind) => {
+    const label = $("add-label").value.trim();
+    const raw = $("add-target").value.trim();
+    if (!raw) return toast("Fill in what it should open");
+    if (kind === "routine") {
+      const targets = raw.split("\n").map((x) => x.trim()).filter(Boolean);
+      addTile({ label: label || "Routine", icon: "sun", run: { type: "routine", targets, focus: Number($("add-focus").value) || 0 } });
+    } else {
+      const target = kind === "web" && !isUrl(raw) ? "https://" + raw : raw;
+      addTile({ label: label || target.replace(/^https?:\/\//, "").split(/[\/\\]/).filter(Boolean).pop(), icon: kind === "web" ? "globe" : "app", run: { type: "open", targets: [target] } });
+    }
+    S.pop = null;
+  },
+  savetile: () => {
+    const tile = S.editTile;
+    tile.label = $("edit-label").value.trim() || tile.label;
+    if ($("edit-targets")) tile.run.targets = $("edit-targets").value.split("\n").map((x) => x.trim()).filter(Boolean);
+    if ($("edit-focus")) tile.run.focus = Number($("edit-focus").value) || 0;
+    saveDeck(); S.pop = null; S.editTile = null;
+  },
+  movetile: (d) => {
+    const tiles = page().tiles;
+    const i = tiles.indexOf(S.editTile), j = i + Number(d);
+    if (j < 0 || j >= tiles.length) return;
+    [tiles[i], tiles[j]] = [tiles[j], tiles[i]];
+    saveDeck();
+  },
+  removetile: () => {
+    const tiles = page().tiles;
+    tiles.splice(tiles.indexOf(S.editTile), 1);
+    saveDeck(); S.pop = null; S.editTile = null;
+  },
+  addpage: () => {
+    S.deckCfg.pages.push({ name: "Page " + (S.deckCfg.pages.length + 1), tiles: [] });
+    S.page = S.deckCfg.pages.length - 1; S.pop = "page"; saveDeck();
+  },
+  savepage: () => { page().name = $("page-name").value.trim() || page().name; saveDeck(); S.pop = null; },
+  movepage: (d) => {
+    const ps = S.deckCfg.pages, i = S.page, j = i + Number(d);
+    if (j < 0 || j >= ps.length) return;
+    [ps[i], ps[j]] = [ps[j], ps[i]];
+    S.page = j; saveDeck();
+  },
+  removepage: () => {
+    if (S.deckCfg.pages.length < 2) return;
+    S.deckCfg.pages.splice(S.page, 1);
+    S.page = Math.max(0, S.page - 1); S.pop = null; saveDeck();
+  },
   pop: (key) => { S.pop = S.pop === key ? null : key; S.toast = ""; },
-  launch: (i) => {
-    const x = S.deckCfg?.launch?.[Number(i)];
-    if (!x) return;
-    invoke("open_targets", { targets: x.open }).then(() => toast("Opening " + x.label), (e) => toast("Couldn't open " + e));
-  },
-  startday: () => {
-    const day = S.deckCfg?.start_my_day ?? {};
-    invoke("open_targets", { targets: day.open ?? [] }).catch((e) => toast("Couldn't open " + e));
-    S.focusUntil = Date.now() + focusMinutes() * 60000;
-    toast(`Day started · focus ${focusMinutes()}m on`);
-  },
   focus: () => (S.focusUntil = S.focusUntil && S.focusUntil > Date.now() ? null : Date.now() + focusMinutes() * 60000),
   mic: () => {
     S.micMuted = !S.micMuted;
@@ -606,8 +818,30 @@ document.addEventListener("keydown", (e) => {
     else hide();
   } else if (e.key === "Enter" && e.target.id === "note") {
     addNote(); render(); $("note").focus();
+  } else if (e.target.id === "cmdq" && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
+    e.preventDefault();
+    const rows = [...$("cmdlist").querySelectorAll(".row")];
+    const i = rows.findIndex((r) => r.classList.contains("sel"));
+    const j = Math.max(0, Math.min(rows.length - 1, i + (e.key === "ArrowDown" ? 1 : -1)));
+    rows.forEach((r, k) => r.classList.toggle("sel", k === j));
+    rows[j]?.scrollIntoView({ block: "nearest" });
   } else if (e.key === "Enter" && e.target.id === "cmdq") {
-    $("cmdlist").querySelector(".row")?.click();
+    ($("cmdlist").querySelector(".row.sel") ?? $("cmdlist").querySelector(".row"))?.click();
+  } else if (!e.target.closest?.("input, textarea, select") && !e.ctrlKey && !e.altKey && !e.metaKey) {
+    // Shortcuts when not typing: 1-9 run tiles, [ ] switch pages, / or Ctrl+K search.
+    const pages = S.deckCfg?.pages ?? [];
+    if (/^[1-9]$/.test(e.key) && !S.editDeck) {
+      const tile = page()?.tiles?.[Number(e.key) - 1];
+      if (tile) { runTile(tile); render(); }
+    } else if ((e.key === "]" || e.key === "PageDown") && pages.length) {
+      ACTIONS.page((S.page + 1) % pages.length); render();
+    } else if ((e.key === "[" || e.key === "PageUp") && pages.length) {
+      ACTIONS.page((S.page - 1 + pages.length) % pages.length); render();
+    } else if (e.key === "/") {
+      e.preventDefault(); S.cmdOpen = true; render();
+    }
+  } else if (e.ctrlKey && e.key.toLowerCase() === "k") {
+    e.preventDefault(); S.cmdOpen = !S.cmdOpen; render();
   }
 });
 
@@ -618,6 +852,11 @@ document.addEventListener("input", (e) => {
     invoke("set_volume", { level: S.volume });
   } else if (e.target.id === "cmdq") {
     filterCmd(e.target.value);
+  } else if (e.target.id === "appq") {
+    S.appQuery = e.target.value;
+    const pos = e.target.selectionStart;
+    renderPop(timer());
+    $("appq").setSelectionRange(pos, pos);
   }
 });
 document.addEventListener("change", (e) => {
@@ -681,6 +920,7 @@ async function loadSystem() {
     invoke("audio_state").catch(() => null),
   ]);
   if (cfg) S.deckCfg = cfg;
+  else if (!S.deckCfg) S.deckCfg = { pages: [] };
   if (audio) { S.volume = audio.volume; S.micMuted = audio.mic_muted; }
   invoke("get_settings").then((v) => { S.aiOn = v.settings.ai.provider !== "off"; }, () => {});
   renderDeck(timer());
@@ -701,7 +941,7 @@ tauri?.event?.listen("overlay:shown", () => {
   loadSystem();
   loadGoals();
   loadTasks();
-  S.pop = null; S.cmdOpen = false; S.snoozeOpen = false; S.sheet = null;
+  S.pop = null; S.cmdOpen = false; S.snoozeOpen = false; S.sheet = null; S.editDeck = false; S.editTile = null;
   render();
   enter();
 });
