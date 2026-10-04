@@ -28,6 +28,12 @@ const ICON = {
   shot: '<path d="M3 8V5a2 2 0 0 1 2-2h3M16 3h3a2 2 0 0 1 2 2v3M21 16v3a2 2 0 0 1-2 2h-3M8 21H5a2 2 0 0 1-2-2v-3"/><circle cx="12" cy="12" r="3"/>',
   clip: '<rect x="6" y="4" width="12" height="17" rx="2"/><path d="M9 4V3h6v1M9 10h6M9 14h4"/>',
   picker: '<path d="M17 2l5 5-3 3-5-5zM14 7l-9 9v3h3l9-9"/>',
+  code: '<path d="M8 7l-5 5 5 5M16 7l5 5-5 5M14 4l-4 16"/>',
+  chat: '<path d="M4 5h16v11H9l-5 4z"/>',
+  music: '<path d="M9 18V5l11-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="17" cy="16" r="3"/>',
+  next: '<path d="M5 5v14l10-7z" fill="currentColor"/><path d="M19 5v14" stroke-width="2.4"/>',
+  playpause: '<path d="M4 5v14l9-7z" fill="currentColor"/><path d="M16 5v14M20 5v14" stroke-width="2.2"/>',
+  smile: '<circle cx="12" cy="12" r="9"/><path d="M8.5 14.5a4.5 4.5 0 0 0 7 0M9 9.5h.01M15 9.5h.01" stroke-width="2.2"/>',
   lock: '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>',
 };
 const svg = (name, size = 22, sw = 1.8) =>
@@ -59,12 +65,14 @@ const dur = (secs) => {
 };
 
 const HISTORY = { read: [1, 1, 1, 1, 1, 1], genshin: [0, 1, 1, 1, 1, 1], side: [1, 0, 1, 1, 1, 0], blender: [0, 0, 1, 0, 0, 1] };
-const CLIPS = [
-  ["cargo add tauri-plugin-autostart", "Terminal · 2m ago"],
-  ["#7048E8", "Color picker · 14m ago"],
-  ["https://docs.rs/windows/latest/windows/", "Firefox · 40m ago"],
-  ["Ask Client X about the API keys", "Quick note · 1h ago"],
-];
+// Used in a plain browser preview; the app reads deck.json.
+const SAMPLE_DECK = {
+  start_my_day: { open: [], focus_minutes: 50 },
+  launch: [
+    { label: "VS Code", icon: "code", open: [] }, { label: "Discord", icon: "chat", open: [] },
+    { label: "Spotify", icon: "music", open: [] }, { label: "Genshin", icon: "pad", open: [] },
+  ],
+};
 
 const store = {
   get(k, d) { try { return JSON.parse(localStorage.getItem(k)) ?? d; } catch { return d; } },
@@ -73,9 +81,10 @@ const store = {
 
 const S = {
   done: { read: true }, snoozed: {}, tab: "today", snoozeOpen: false, cmdOpen: false,
-  focusUntil: null, micMuted: false, playing: false, editing: false,
+  focusUntil: null, micMuted: false, editing: false,
   notes: store.get("notes", ["Ask Client X about the API keys"]),
-  deck: store.get("deck", "launch"), pop: null, volume: 60, output: "Speakers",
+  deck: store.get("deck", "launch"), pop: null, volume: 50,
+  deckCfg: tauri ? null : SAMPLE_DECK,
   timerEnd: null, toast: "",
   timeline: tauri ? null : SAMPLE_TIMELINE,
 };
@@ -209,45 +218,43 @@ function renderRight(q) {
 
 function tiles(t) {
   const focusOn = S.focusUntil && S.focusUntil > Date.now();
-  const add = { label: "Add tile", icon: "plus", cls: "add", act: "toast", arg: "Pick an app, folder, URL or script to pin" };
+  const cfg = S.deckCfg;
   const pages = {
     launch: [
       { label: "Start my day", icon: "sun", cls: "soft", act: "startday" },
-      { label: "Side project", icon: "folder", cls: "accent", dot: true, act: "open", arg: "Side project" },
-      { label: "Client X", icon: "brief", act: "open", arg: "Client X workspace" },
-      { label: "Blender", icon: "cube", act: "open", arg: "Blender · donut.blend" },
-      { label: "Genshin", icon: "pad", act: "open", arg: "Genshin Impact" },
-      add,
+      ...(cfg?.launch ?? []).slice(0, 5).map((x, i) => ({ label: x.label, icon: ICON[x.icon] ? x.icon : "folder", act: "launch", arg: String(i) })),
+      { label: "Add tile", icon: "plus", cls: "add", act: "edit" },
     ],
     controls: [
-      { label: focusOn ? "Until " + fmt(new Date(S.focusUntil)) : "Focus 50m", icon: "target", cls: focusOn ? "accent" : "soft", act: "focus" },
+      { label: focusOn ? "Until " + fmt(new Date(S.focusUntil)) : `Focus ${focusMinutes()}m`, icon: "target", cls: focusOn ? "accent" : "soft", act: "focus" },
       { label: t.running ? t.text : "Timer", icon: "timer", cls: S.pop === "timer" ? "active" : t.running ? "soft" : "", act: "pop", arg: "timer" },
       { label: S.micMuted ? "Muted" : "Mic on", icon: S.micMuted ? "micoff" : "mic", cls: S.micMuted ? "warn" : "", act: "mic" },
-      { label: S.playing ? "Pause" : "Play", icon: S.playing ? "pause" : "play", act: "play" },
+      { label: "Play/Pause", icon: "playpause", act: "media", arg: "playpause" },
+      { label: "Next", icon: "next", act: "media", arg: "next" },
       { label: `Vol ${S.volume}%`, icon: "vol", cls: S.pop === "volume" ? "active" : "", act: "pop", arg: "volume" },
     ],
     tools: [
-      { label: "Screenshot", icon: "shot", act: "toast", arg: "Screenshot copied to clipboard" },
-      { label: "Clipboard", icon: "clip", cls: S.pop === "clip" ? "active" : "", act: "pop", arg: "clip" },
-      { label: "Pick color", icon: "picker", act: "toast", arg: "#7048E8 copied" },
-      { label: "Lock PC", icon: "lock", act: "toast", arg: "Would lock Windows (Win + L)" },
-      add,
+      { label: "Snip", icon: "shot", act: "shell", arg: "screenshot" },
+      { label: "Clipboard", icon: "clip", act: "shell", arg: "clipboard" },
+      { label: "Emoji", icon: "smile", act: "shell", arg: "emoji" },
+      { label: "Lock PC", icon: "lock", act: "shell", arg: "lock" },
+      { label: "Edit deck", icon: "pencil", cls: "add", act: "edit" },
     ],
   };
   return pages[S.deck];
 }
+const focusMinutes = () => S.deckCfg?.start_my_day?.focus_minutes ?? 50;
 function renderDeck(t) {
   const pages = [["launch", "Launch"], ["controls", "Controls"], ["tools", "Tools"]]
     .map(([id, l]) => `<button class="${S.deck === id ? "on" : ""}" data-act="deck" data-arg="${id}">${l}</button>`).join("");
   const el = $("deck");
-  el.classList.toggle("editing", S.editing);
   el.innerHTML = `
     <div class="pages">${pages}</div>
     <div class="tiles">${tiles(t).map((x) => `
       <button class="tile ${x.cls || ""}" data-act="${x.act}" data-arg="${esc(x.arg || "")}" aria-label="${esc(x.label)}">
         <span class="ico">${svg(x.icon)}</span>${x.dot ? '<span class="dot"></span>' : ""}${esc(x.label)}
       </button>`).join("")}</div>
-    <button class="editbtn round${S.editing ? " on" : ""}" data-act="edit" aria-label="Edit deck">${svg("pencil", 18, 2)}</button>`;
+    <button class="editbtn round" data-act="edit" aria-label="Edit deck.json">${svg("pencil", 18, 2)}</button>`;
 }
 
 function renderPop(t) {
@@ -256,14 +263,12 @@ function renderPop(t) {
   if (S.pop === "volume") {
     el.innerHTML = `<header>Volume <span id="volval">${S.volume}%</span></header>
       <input id="vol" type="range" min="0" max="100" value="${S.volume}" aria-label="Volume">
-      ${["Speakers", "Headphones"].map((n) => `<button class="out row${S.output === n ? " sel" : ""}" data-act="output" data-arg="${n}"><span>${n}</span><small>${S.output === n ? "Active" : ""}</small></button>`).join("")}`;
+      <p>Default output device</p>`;
   } else if (S.pop === "timer") {
     el.innerHTML = `<header>Timer <span id="timertext">${t.text}</span></header>
       <div class="grid4">${[5, 15, 25, 50].map((m) => `<button data-act="timer" data-arg="${m}">${m}m</button>`).join("")}</div>
       ${t.running ? `<button class="pill primary" data-act="timerstop">Stop timer</button>` : ""}
       <p>Timers count as proof for manual goals like “Read 30 min”.</p>`;
-  } else if (S.pop === "clip") {
-    el.innerHTML = `<header>Clipboard</header>${CLIPS.map(([text, meta]) => `<button class="clip row" data-act="toast" data-arg="Copied again: ${esc(text.length > 28 ? text.slice(0, 28) + "…" : text)}"><b>${esc(text)}</b><small>${meta}</small></button>`).join("")}`;
   }
 }
 
@@ -285,9 +290,7 @@ function render() {
   renderPop(t);
   renderToast();
   $("settings").innerHTML = svg("sliders", 18, 2);
-  $("hint").innerHTML = S.editing
-    ? "Editing deck · drag tiles to reorder, click one to change it"
-    : "<kbd>Alt + Space</kbd> opens · <kbd>Esc</kbd> back to tray";
+  $("hint").innerHTML = "<kbd>Alt + Space</kbd> opens · <kbd>Esc</kbd> back to tray";
 }
 
 // ---------- actions ----------
@@ -334,14 +337,26 @@ const ACTIONS = {
   snooze: (label) => { const c = queue(goals())[0]; if (c) S.snoozed[c.id] = label; S.snoozeOpen = false; },
   note: addNote,
   deck: (id) => { S.deck = id; S.pop = null; store.set("deck", id); },
-  edit: () => { S.editing = !S.editing; S.pop = null; },
+  edit: () => { invoke("edit_deck").catch(() => {}); toast("Opened deck.json · changes show next time"); },
   pop: (key) => { S.pop = S.pop === key ? null : key; S.toast = ""; },
-  open: (name) => toast("Opened " + name),
-  startday: () => { S.focusUntil = Date.now() + 50 * 60000; toast("Day started · workspace open · focus 50m on"); },
-  focus: () => (S.focusUntil = S.focusUntil && S.focusUntil > Date.now() ? null : Date.now() + 50 * 60000),
-  mic: () => (S.micMuted = !S.micMuted),
-  play: () => (S.playing = !S.playing),
-  output: (n) => (S.output = n),
+  launch: (i) => {
+    const x = S.deckCfg?.launch?.[Number(i)];
+    if (!x) return;
+    invoke("open_targets", { targets: x.open }).then(() => toast("Opening " + x.label), (e) => toast("Couldn't open " + e));
+  },
+  startday: () => {
+    const day = S.deckCfg?.start_my_day ?? {};
+    invoke("open_targets", { targets: day.open ?? [] }).catch((e) => toast("Couldn't open " + e));
+    S.focusUntil = Date.now() + focusMinutes() * 60000;
+    toast(`Day started · focus ${focusMinutes()}m on`);
+  },
+  focus: () => (S.focusUntil = S.focusUntil && S.focusUntil > Date.now() ? null : Date.now() + focusMinutes() * 60000),
+  mic: () => {
+    S.micMuted = !S.micMuted;
+    invoke("set_mic_muted", { muted: S.micMuted }).catch(() => { S.micMuted = !S.micMuted; toast("No microphone found"); render(); });
+  },
+  media: (action) => invoke("media", { action }),
+  shell: (action) => invoke("shell_action", { action }),
   timer: (m) => (S.timerEnd = Date.now() + Number(m) * 60000),
   timerstop: () => (S.timerEnd = null),
   toast: (text) => toast(text),
@@ -376,6 +391,7 @@ document.addEventListener("input", (e) => {
   if (e.target.id === "vol") {
     S.volume = Number(e.target.value);
     $("volval").textContent = S.volume + "%";
+    invoke("set_volume", { level: S.volume });
   } else if (e.target.id === "cmdq") {
     filterCmd(e.target.value);
   }
@@ -403,6 +419,17 @@ async function syncAccent() {
   document.documentElement.style.setProperty("--accent-ink", light ? "#111" : "#fff");
 }
 
+async function loadSystem() {
+  if (!tauri) return;
+  const [cfg, audio] = await Promise.all([
+    invoke("deck_config").catch((e) => { toast(String(e)); return null; }),
+    invoke("audio_state").catch(() => null),
+  ]);
+  if (cfg) S.deckCfg = cfg;
+  if (audio) { S.volume = audio.volume; S.micMuted = audio.mic_muted; }
+  renderDeck(timer());
+}
+
 async function loadTimeline() {
   if (!tauri) return;
   const tl = await invoke("timeline").catch(() => null);
@@ -415,6 +442,7 @@ async function loadTimeline() {
 tauri?.event?.listen("overlay:shown", () => {
   syncAccent();
   loadTimeline();
+  loadSystem();
   S.pop = null; S.cmdOpen = false; S.snoozeOpen = false;
   render();
   enter();
@@ -424,4 +452,5 @@ tauri?.event?.listen("overlay:hide", hide);
 render();
 syncAccent();
 loadTimeline();
+loadSystem();
 enter();

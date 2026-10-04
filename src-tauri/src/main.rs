@@ -1,6 +1,9 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod deck;
 mod store;
+#[cfg(windows)]
+mod system;
 mod timeline;
 #[cfg(windows)]
 mod tracker;
@@ -120,6 +123,60 @@ fn timeline(store: tauri::State<Arc<Store>>) -> Result<timeline::Timeline, Strin
     timeline::today(&store).map_err(|e| e.to_string())
 }
 
+fn data_dir(app: &AppHandle) -> Result<std::path::PathBuf, String> {
+    app.path().app_data_dir().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn deck_config(app: AppHandle) -> Result<serde_json::Value, String> {
+    deck::load(&data_dir(&app)?)
+}
+
+#[tauri::command]
+fn edit_deck(app: AppHandle) -> Result<(), String> {
+    let dir = data_dir(&app)?;
+    deck::load(&dir)?;
+    system::open(&deck::path(&dir).to_string_lossy())
+}
+
+#[tauri::command]
+fn open_targets(targets: Vec<String>) -> Result<(), String> {
+    let failed: Vec<String> = targets.iter().filter_map(|t| system::open(t).err()).collect();
+    if failed.is_empty() { Ok(()) } else { Err(failed.join(", ")) }
+}
+
+#[tauri::command]
+fn audio_state() -> Result<system::AudioState, String> {
+    system::audio_state()
+}
+
+#[tauri::command]
+fn set_volume(level: u32) -> Result<(), String> {
+    system::set_volume(level)
+}
+
+#[tauri::command]
+fn set_mic_muted(muted: bool) -> Result<(), String> {
+    system::set_mic_muted(muted)
+}
+
+#[tauri::command]
+fn media(action: String) -> Result<(), String> {
+    system::media(&action)
+}
+
+/// Snip, clipboard history, emoji, lock: get the overlay out of the way, then trigger.
+#[tauri::command]
+fn shell_action(app: AppHandle, action: String) {
+    hide(&app);
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(180));
+        if let Err(e) = system::shell(&action) {
+            eprintln!("{e}");
+        }
+    });
+}
+
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _, _| show(app)))
@@ -134,7 +191,19 @@ fn main() {
                 })
                 .build(),
         )
-        .invoke_handler(tauri::generate_handler![hide_overlay, accent_color, timeline])
+        .invoke_handler(tauri::generate_handler![
+            hide_overlay,
+            accent_color,
+            timeline,
+            deck_config,
+            edit_deck,
+            open_targets,
+            audio_state,
+            set_volume,
+            set_mic_muted,
+            media,
+            shell_action
+        ])
         .setup(|app| {
             let dir = app.path().app_data_dir()?;
             std::fs::create_dir_all(&dir)?;
