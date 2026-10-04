@@ -42,15 +42,22 @@ const GOALS = [
   { id: "blender", name: "Blender practice", src: "Window time", detail: "20 of 45 min", due: "23:00", left: "25m to go", short: "Blender · 25m", pct: 44, color: "#4263eb", streak: 1, tag: "In progress", title: "25 more minutes in Blender", action: "Open Blender" },
   { id: "read", name: "Read 30 min", src: "Manual", detail: "Not checked yet", due: "Any time", left: "today", short: "Read · today", pct: 0, color: "#2f9e44", streak: 12, tag: "Manual goal", title: "Read for 30 minutes", action: "Start 30m timer", manual: true },
 ];
-const TIMELINE = [
-  ["09:10", "VS Code", "side-project", "1h 42m", 100, "#4263eb"],
-  ["11:05", "Firefox", "docs.rs", "38m", 37, "#4263eb"],
-  ["12:30", "Away", "idle", "55m", 54, "var(--track)"],
-  ["13:40", "Blender", "donut", "20m", 20, "#7048e8"],
-  ["15:02", "Genshin", "game", "31m", 30, "#f08c00"],
-  ["16:10", "Discord", "chat", "12m", 12, "#e64980"],
-  ["16:40", "VS Code", "client-x", "1h 05m", 64, "#4263eb"],
-];
+// Shown only in a plain browser preview, where there's no tracker to ask.
+const SAMPLE_TIMELINE = {
+  focused: 15480, away: 3300,
+  entries: [
+    [16, 40, "Visual Studio Code", "client-x", 3900], [16, 10, "Discord", "Server", 720], [15, 2, "Genshin Impact", "", 1860],
+    [13, 40, "Blender", "donut.blend", 1200], [12, 30, "Away", "idle", 3300, true], [11, 5, "Firefox", "docs.rs", 2280],
+    [9, 10, "Visual Studio Code", "moondeck", 6120],
+  ].map(([h, m, app, what, secs, away]) => ({ start: new Date().setHours(h, m, 0) / 1000, app, what, secs, away: !!away })),
+};
+const PALETTE = ["#4263eb", "#7048e8", "#f08c00", "#e64980", "#0ca678", "#1098ad", "#d6336c", "#74b816"];
+const appColor = (app) => PALETTE[[...app].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7) % PALETTE.length];
+const dur = (secs) => {
+  const m = Math.round(secs / 60);
+  return m >= 60 ? `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, "0")}m` : `${m}m`;
+};
+
 const HISTORY = { read: [1, 1, 1, 1, 1, 1], genshin: [0, 1, 1, 1, 1, 1], side: [1, 0, 1, 1, 1, 0], blender: [0, 0, 1, 0, 0, 1] };
 const CLIPS = [
   ["cargo add tauri-plugin-autostart", "Terminal · 2m ago"],
@@ -70,6 +77,7 @@ const S = {
   notes: store.get("notes", ["Ask Client X about the API keys"]),
   deck: store.get("deck", "launch"), pop: null, volume: 60, output: "Speakers",
   timerEnd: null, toast: "",
+  timeline: tauri ? null : SAMPLE_TIMELINE,
 };
 
 // ---------- derived ----------
@@ -151,10 +159,15 @@ function renderLeft(gs) {
       <button class="ghost" data-act="toast" data-arg="Goal editor is coming next">+ New goal</button>
       <p class="foot">Tap a circle to mark done yourself</p></div>`;
   } else if (S.tab === "timeline") {
-    body = `<div class="list">${TIMELINE.map(([t, app, what, dur, w, c]) => `
-      <div class="tl"><time>${t}</time><div><b>${app} <span>· ${what}</span></b><i style="width:${w}%;background:${c}"></i></div><em>${dur}</em></div>`).join("")}
+    const tl = S.timeline;
+    const max = Math.max(1, ...(tl?.entries ?? []).map((e) => e.secs));
+    const rows = !tl ? `<p class="foot">Loading…</p>`
+      : !tl.entries.length ? `<p class="foot">Nothing tracked yet today. Keep Moondeck running and this fills in.</p>`
+      : tl.entries.map((e) => `
+      <div class="tl"><time>${fmt(new Date(e.start * 1000))}</time><div><b>${esc(e.app)}${e.what ? ` <span>· ${esc(e.what)}</span>` : ""}</b><i style="width:${Math.max(4, (e.secs / max) * 100)}%;background:${e.away ? "var(--track)" : appColor(e.app)}"></i></div><em>${dur(e.secs)}</em></div>`).join("");
+    body = `<div class="list">${rows}
       <span class="spacer"></span>
-      <div class="total"><span>Focused today</span><b>4h 18m</b></div></div>`;
+      <div class="total"><span>Focused today</span><b>${tl ? dur(tl.focused) : "–"}</b></div></div>`;
   } else {
     body = `<div class="list">${gs.map((g) => {
       const days = HISTORY[g.id].map((b) => `<span class="${b ? "on" : ""}"></span>`).join("") + `<span class="${g.done ? "on" : "today"}"></span>`;
@@ -313,7 +326,7 @@ function hide() {
 const ACTIONS = {
   cmd: () => (S.cmdOpen = !S.cmdOpen),
   run: (arg) => { S.cmdOpen = false; const [a, ...rest] = arg.split(":"); ACTIONS[a]?.(rest.join(":")); },
-  tab: (id) => (S.tab = id),
+  tab: (id) => { S.tab = id; if (id === "timeline") loadTimeline(); },
   toggle: (id) => (S.done[id] = !S.done[id]),
   done: () => { const c = queue(goals())[0]; if (c) S.done[c.id] = true; S.snoozeOpen = false; },
   primary: () => { const c = queue(goals())[0]; if (c) toast(c.action + "…"); },
@@ -390,9 +403,18 @@ async function syncAccent() {
   document.documentElement.style.setProperty("--accent-ink", light ? "#111" : "#fff");
 }
 
+async function loadTimeline() {
+  if (!tauri) return;
+  const tl = await invoke("timeline").catch(() => null);
+  if (!tl) return;
+  S.timeline = tl;
+  if (S.tab === "timeline") renderLeft(goals());
+}
+
 // Fresh state every time the overlay is summoned.
 tauri?.event?.listen("overlay:shown", () => {
   syncAccent();
+  loadTimeline();
   S.pop = null; S.cmdOpen = false; S.snoozeOpen = false;
   render();
   enter();
@@ -401,4 +423,5 @@ tauri?.event?.listen("overlay:hide", hide);
 
 render();
 syncAccent();
+loadTimeline();
 enter();

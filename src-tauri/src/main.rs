@@ -1,7 +1,15 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod store;
+mod timeline;
+#[cfg(windows)]
+mod tracker;
+
 use std::{
-    sync::atomic::{AtomicU64, Ordering},
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
     time::Duration,
 };
 
@@ -10,6 +18,7 @@ use tauri::{
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     AppHandle, Emitter, Manager, WindowEvent,
 };
+use store::Store;
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 
 const OVERLAY: &str = "overlay";
@@ -106,6 +115,11 @@ fn accent_color() -> Option<String> {
     None
 }
 
+#[tauri::command]
+fn timeline(store: tauri::State<Arc<Store>>) -> Result<timeline::Timeline, String> {
+    timeline::today(&store).map_err(|e| e.to_string())
+}
+
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _, _| show(app)))
@@ -120,8 +134,15 @@ fn main() {
                 })
                 .build(),
         )
-        .invoke_handler(tauri::generate_handler![hide_overlay, accent_color])
+        .invoke_handler(tauri::generate_handler![hide_overlay, accent_color, timeline])
         .setup(|app| {
+            let dir = app.path().app_data_dir()?;
+            std::fs::create_dir_all(&dir)?;
+            let store = Arc::new(Store::open(&dir.join("moondeck.db"))?);
+            #[cfg(windows)]
+            tracker::spawn(store.clone());
+            app.manage(store);
+
             let open = MenuItem::with_id(app, "open", "Open  (Alt+Space)", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "Quit Moondeck", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&open, &quit])?;
